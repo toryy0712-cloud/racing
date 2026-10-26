@@ -247,7 +247,7 @@
                 <p class="text-gray-300 text-xs sm:text-sm mt-1">왕건, 궁예, 견훤의 시대를 달리는 3D 아이템 레이스!</p>
                 
                 <!-- Admin Hidden Toggle Button (Top Right) -->
-                <button onclick="toggleAdminPanel()" class="absolute top-0 right-0 text-gray-500 hover:text-white p-2 text-xs">
+                <button onclick="toggleAdminPanel()" class="hidden" tabindex="-1" aria-hidden="true">
                     <i class="fa-solid fa-user-gear text-lg"></i>
                 </button>
             </div>
@@ -273,7 +273,7 @@
                         <option value="normal" selected class="bg-slate-900">보통</option>
                         <option value="hard" class="bg-slate-900">어려움</option>
                         <option value="hell" class="bg-slate-900">지옥 (AI 최고)</option>
-                        <option value="extreme" class="bg-slate-900">☠️ 익스트림 (1등 클리어 시 관리자 카)</option>
+                        <option value="extreme" class="bg-slate-900">☠️ 익스트림 (초고난이도)</option>
                     </select>
                 </div>
             </div>
@@ -565,7 +565,7 @@
             { id: "phoenix", name: "🔥 불사조", topSpeed: 53, accel: 0.20, handling: 0.050, color: 0xff5722, price: 8500 },
             { id: "galaxy", name: "🌠 갤럭시 레이서", topSpeed: 51, accel: 0.19, handling: 0.054, color: 0x3949ab, price: 11000 },
             { id: "legend", name: "🏆 전설의 챔피언", topSpeed: 56, accel: 0.22, handling: 0.058, color: 0xffffff, price: 15000 },
-            { id: "adminx", name: "👑 관리자 카 (최고속도 500)", topSpeed: 125, accel: 0.9, handling: 0.10, color: 0x00ffcc, price: 99999999, reward: true }
+            { id: "adminx", name: "👑 관리자 전용 카 (최고속도 500)", topSpeed: 125, accel: 0.9, handling: 0.10, color: 0x00ffcc, price: 99999999, reward: true }
         ];
         const CAR_STYLE = { sport: 'wing', super: 'rocket', future: 'ufo', chariot: 'tank', bubble: 'bubble', tiger: 'horn', dragon: 'wing', alien: 'ufo', tank: 'tank', rocket: 'rocket', gold: 'crown', ghost: 'bubble', hubaek: 'horn', taebong: 'wing', silla: 'crown', goryeo: 'bubble', bunny: 'ears', cat: 'ears', shark: 'fin', angel: 'halo', cannon: 'cannon', phoenix: 'rocket', galaxy: 'ufo', legend: 'crown' };
 
@@ -578,7 +578,8 @@
             upgrades: { engine: 1, booster: 1, tire: 1 },
             unlockedCars: CAR_DATA.map((c, i) => i === 0),
             godMode: false,
-            adm: {}
+            adm: {},
+            teamMode: 0
         };
 
         /* =========================================================================
@@ -609,6 +610,75 @@
         let kartPads = [], kartCoins = [];
         let quizTimer = 30;
         const isExtreme = () => playerStats.aiDifficulty === "extreme";
+
+        // ===== 팀전: 2팀(4:4) / 4팀(2:2). 팀 점수 = 순위 점수 + 팀이 먹은 코인 =====
+        const TEAM_DEF = [{ n: '태봉', e: '🔴', c: 0xe53935 }, { n: '고려', e: '🔵', c: 0x1e88e5 }, { n: '후백제', e: '🟣', c: 0x8e24aa }, { n: '신라', e: '🟡', c: 0xfdd835 }];
+        const TEAM_PTS = [10, 8, 6, 5, 4, 3, 2, 1];
+        // ===== 자동차별 패시브 스킬 =====
+        const PASSIVES = {
+            sport:   { name: '🏎️ 순간가속', desc: '가속력 +25%', accel: 1.25 },
+            super:   { name: '⚡ 번개 출발', desc: '출발 시 2초 가속', startBoost: 1 },
+            future:  { name: '🛰️ 자동 보급', desc: '25초마다 아이템 1개 자동 획득', regen: 25 },
+            chariot: { name: '🛡️ 철벽 돌진', desc: '스턴 시간 절반', stunRes: 1 },
+            bubble:  { name: '🫧 버블 방패', desc: '출발 후 5초간 보호막', startShield: 1 },
+            tiger:   { name: '🐯 맹호출림', desc: '1등일 때 속도 +8%', leader: 0.08 },
+            dragon:  { name: '🐲 용의 숨결', desc: '드리프트 게이지 1.6배 빠르게', drift: 1.6 },
+            alien:   { name: '🛸 코인 자석', desc: '코인을 더 멀리서 흡수', magnet: 5 },
+            tank:    { name: '🪨 불굴', desc: '스턴 시간 절반 + 잔디 감속 없음', stunRes: 1, grass: 1 },
+            rocket:  { name: '🚀 부스터 연장', desc: '모든 부스터 지속시간 +40%', boostLong: 1.4 },
+            gold:    { name: '👑 황금손', desc: '코인 1개를 2개로 계산 + 코인 속도 보너스 1.5배', coinPlus: 1, coinSpeed: 1.5 },
+            ghost:   { name: '👻 유령 질주', desc: '잔디 감속 없음 + 핸들링 +10%', grass: 1, steer: 1.1 },
+            hubaek:  { name: '🐉 후백제의 기세', desc: '4등 이하일 때 속도 +10%', comeback: 0.10 },
+            taebong: { name: '🦅 관심법', desc: '시작할 때 아이템 1개 보유', startItem: 1 },
+            silla:   { name: '🌙 금관의 축복', desc: '매 바퀴 시작 시 2초 가속', lapBoost: 1 },
+            goryeo:  { name: '🏺 청자의 빛', desc: '코인 속도 보너스 2배', coinSpeed: 2 },
+            bunny:   { name: '🐰 깡총 출발', desc: '출발 시 2초 가속 + 핸들링 +10%', startBoost: 1, steer: 1.1 },
+            cat:     { name: '🐱 아홉 목숨', desc: '스턴 시간 절반 + 핸들링 +15%', stunRes: 1, steer: 1.15 },
+            shark:   { name: '🦈 상어의 추격', desc: '4등 이하일 때 속도 +12%', comeback: 0.12 },
+            angel:   { name: '😇 천사의 가호', desc: '출발 후 5초간 보호막 + 가속력 +10%', startShield: 1, accel: 1.1 },
+            cannon:  { name: '💣 대포 보급', desc: '20초마다 아이템 1개 자동 획득', regen: 20 },
+            phoenix: { name: '🔥 불사조의 재', desc: '매 바퀴 2초 가속 + 최고속도 +4%', lapBoost: 1, top: 0.04 },
+            galaxy:  { name: '🌠 은하의 자석', desc: '코인 흡수 범위↑ + 코인 속도 보너스 1.5배', magnet: 4, coinSpeed: 1.5 },
+            legend:  { name: '🏆 전설', desc: '최고속도 +6%, 1등일 때 +6% 더', top: 0.06, leader: 0.06 },
+            adminx:  { name: '👑 관리자의 권능', desc: '스턴 절반 · 잔디 무시 · 코인 자석 · 부스터 +50%', stunRes: 1, grass: 1, magnet: 6, boostLong: 1.5 }
+        };
+        const NOPAS = {};
+        const P = v => (v && v.pas) || NOPAS;
+        function passiveSpeed(v) {
+            const p = P(v); let m = 1 + (p.top || 0);
+            if(p.comeback || p.leader) {
+                const r = rankVehicles().indexOf(v);
+                if(p.comeback && r >= 3) m += p.comeback;
+                if(p.leader && r === 0) m += p.leader;
+            }
+            return m;
+        }
+        function giveRandomItem(v) {
+            v.heldItem = ALL_ITEMS[Math.floor(Math.random() * ALL_ITEMS.length)];
+            if(v.isPlayer) updateItemHUD(v.heldItem);
+        }
+
+        const teamMode = () => playerStats.teamMode > 0;
+        function addTeamMarker(v) {
+            const col = TEAM_DEF[v.team].c;
+            const mat = () => new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: 0.8 });
+            const cone = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.4, 4), mat());
+            cone.rotation.x = Math.PI; cone.position.y = 5.6; v.mesh.add(cone);
+            const ring = new THREE.Mesh(new THREE.TorusGeometry(2.1, 0.15, 8, 24), mat());
+            ring.rotation.x = Math.PI / 2; ring.position.y = 0.2; v.mesh.add(ring);
+        }
+        function teamScores(sorted) {
+            const T = Array.from({ length: playerStats.teamMode }, (_, i) => ({ i, pts: 0, coins: 0, total: 0 }));
+            sorted.forEach((v, r) => { if(v.team >= 0 && T[v.team]) { T[v.team].pts += TEAM_PTS[r] || 0; T[v.team].coins += v.tcoins || 0; } });
+            T.forEach(t => { t.total = t.pts + t.coins; });
+            return T.sort((a, b) => b.total - a.total);
+        }
+        function updateTeamHUD(sorted) {
+            if(!dom.team) { dom.team = document.createElement('div'); dom.team.className = 'fixed right-2 top-44 z-30 text-xs bg-black/60 text-white rounded-lg p-2'; document.body.appendChild(dom.team); }
+            if(!teamMode()) { dom.team.style.display = 'none'; return; }
+            dom.team.style.display = 'block';
+            dom.team.innerHTML = teamScores(sorted).map(t => `${TEAM_DEF[t.i].e} ${TEAM_DEF[t.i].n} 🪙${t.coins} · ${t.total}점`).join('<br>');
+        }
         let fxFromPlayer = false;
         const HIST_NAMES = ['견훤', '궁예', '왕건', '신검', '양길', '박영규', '최승우', '능애'];
         const MP = { on: false, id: Math.random().toString(36).slice(2, 8), ch: null, peers: {}, sendT: 0 };
@@ -1115,7 +1185,11 @@
                 veh.finishTime = 0;
                 veh.offDist = 0;
                 veh.lane = lane;
-                if(!isPlayer) setTag(veh, HIST_NAMES[vehicles.length % 8]);
+                veh.pas = PASSIVES[carData.id] || {};
+                veh.team = teamMode() ? vehicles.length % playerStats.teamMode : -1;
+                veh.tcoins = 0;
+                if(veh.team >= 0) addTeamMarker(veh);
+                if(!isPlayer) setTag(veh, (veh.team >= 0 ? TEAM_DEF[veh.team].e + ' ' : '') + HIST_NAMES[vehicles.length % 8]);
                 if(carData.reward) veh.maxSpeed = 125;
                 if(isPlayer && playerStats.godMode) veh.maxSpeed = Math.max(veh.maxSpeed, 80);
                 vehicles.push(veh);
@@ -1135,7 +1209,10 @@
            5. GAME LOOP & UPDATE CONTROLS
            ========================================================================= */
         function startRace(fromNet) {
-            if(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar) { playerStats.selectedCar = 0; updateCarUI(); }
+            if(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar) {
+                askAdminPin(() => { playerStats.adminCar = true; updateCarUI(); startRace(fromNet); }, () => { playerStats.selectedCar = 0; updateCarUI(); });
+                return;
+            }
             if(!audioCtx) setupAudio();
             if(audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
 
@@ -1161,7 +1238,7 @@
             snapCamera();
             gameState = "COUNTDOWN";
             runCountdown();
-            if(isExtreme()) setTimeout(() => showGameMessage("☠️ 익스트림: AI 125% 속도 · 약한 고무줄"), 800);
+            if(isExtreme()) setTimeout(() => showGameMessage("☠️ 익스트림: AI 150% 속도 · 고무줄 · 맹공격"), 800);
             if(MP.ch && !fromNet) MP.ch.postMessage({ t: 'start', id: MP.id, name: MP.name, map: playerStats.selectedMap });
         }
 
@@ -1184,7 +1261,17 @@
                 } else if(count === 0) {
                     text.textContent = "GO!"; text.style.color = "#3bff6b";
                     playSound('go');
-                    if(gameState === "COUNTDOWN") gameState = "RACING";
+                    if(gameState === "COUNTDOWN") {
+                        gameState = "RACING";
+                        vehicles.forEach(v => {
+                            const p = P(v);
+                            if(p.startBoost) triggerBoost(v, 1.6, 2);
+                            if(p.startShield) { v.shieldActive = true; setTimeout(() => { v.shieldActive = false; }, 5000); }
+                            if(p.startItem && !v.heldItem) giveRandomItem(v);
+                        });
+                        const mine = P(vehicles[0]);
+                        if(mine.name) setTimeout(() => showGameMessage("✨ 패시브: " + mine.name), 1200);
+                    }
                 } else {
                     clearInterval(countdownTimer);
                     countdownTimer = null;
@@ -1209,7 +1296,7 @@
                     raceTime += delta;
                     quizTimer -= delta;
                     if(quizTimer <= 0 && vehicles[0] && !vehicles[0].finished && !(vehicles[0].stunTimer > 0)) {
-                        quizTimer = (isExtreme() ? 35 : 40) + Math.random() * (isExtreme() ? 20 : 30);
+                        quizTimer = (isExtreme() ? 25 : 40) + Math.random() * (isExtreme() ? 15 : 30);
                         showGameMessage("📜 역사 퀴즈!");
                         openQuizModal();
                     }
@@ -1249,29 +1336,29 @@
             const f = delta * 60; // 프레임레이트와 무관하게 같은 속도감
             const A = playerStats.adm;
             if(A.god) { v.stunTimer = 0; v.slowTimer = 0; v.shieldActive = true; }
-            if(v.stunTimer > 0) { v.stunTimer -= delta; v.speed = 0; dom.speedNum.textContent = 0; return; }
-            let effMaxSpeed = v.maxSpeed * v.boostMultiplier * (playerStats.adm.turbo2 ? 2 : 1) * (1 + (v.kcoins || 0) * 0.03);
+            if(v.stunTimer > 0) { v.stunTimer -= delta * (P(v).stunRes ? 2 : 1); v.speed = 0; dom.speedNum.textContent = 0; return; }
+            let effMaxSpeed = v.maxSpeed * v.boostMultiplier * (playerStats.adm.turbo2 ? 2 : 1) * (1 + (v.kcoins || 0) * 0.03 * (P(v).coinSpeed || 1)) * passiveSpeed(v);
             if(v.slowTimer > 0) {
                 effMaxSpeed *= 0.5;
                 v.slowTimer -= delta;
             }
-            if(v.offDist > 17 && v.maxSpeed < 120) effMaxSpeed *= (isExtreme() ? 0.5 : 0.6); // 트랙 밖(잔디) 감속 (관리자 카는 면제)
+            if(v.offDist > 17 && v.maxSpeed < 120 && !P(v).grass) effMaxSpeed *= (isExtreme() ? 0.35 : 0.6); // 트랙 밖(잔디) 감속 (관리자 카는 면제)
             if(v.maxSpeed >= 120 && !playerStats.adm.turbo2) effMaxSpeed = Math.min(effMaxSpeed, 125); // 관리자 카: 500 상한
 
             if(keys.forward) {
-                v.speed = Math.min(v.speed + v.accel * f * (playerStats.adm.turbo2 ? 3 : 1), effMaxSpeed);
+                v.speed = Math.min(v.speed + v.accel * f * (playerStats.adm.turbo2 ? 3 : 1) * (P(v).accel || 1), effMaxSpeed);
             } else if(keys.backward) {
                 v.speed = Math.max(v.speed - v.accel * 1.5 * f, -effMaxSpeed * 0.4);
             } else {
                 v.speed *= Math.pow(0.98, f);
             }
 
-            let turnAngle = v.handling * f;
+            let turnAngle = v.handling * f * (P(v).steer || 1);
             if(keys.drift && Math.abs(v.speed) > 10) {
                 v.isDrifting = true;
                 turnAngle *= 1.6;
                 const prevGauge = Math.floor(v.driftGauge);
-                v.driftGauge = Math.min(v.driftGauge + delta * 30, 100);
+                v.driftGauge = Math.min(v.driftGauge + delta * 30 * (P(v).drift || 1), 100);
                 if(Math.floor(v.driftGauge) !== prevGauge) showDriftScore(Math.floor(v.driftGauge));
             } else {
                 if(v.isDrifting) {
@@ -1308,7 +1395,7 @@
         function updateAIPhysics(v, delta, idx) {
             const f = delta * 60;
             if(playerStats.adm.freezeAI) { v.speed = 0; return; }
-            if(v.stunTimer > 0) { v.stunTimer -= delta * (isExtreme() ? 1.5 : 1); v.speed = 0; return; }
+            if(v.stunTimer > 0) { v.stunTimer -= delta * (isExtreme() ? 3 : 1); v.speed = 0; return; }
             if(v.hijackTimer > 0) { // 플레이어가 조종
                 v.hijackTimer -= delta;
                 if(keys.left) v.heading += v.handling * f * 1.5;
@@ -1331,26 +1418,26 @@
             while (diff > Math.PI) diff -= Math.PI * 2;
             v.heading += diff * Math.min(1, 0.05 * f);
 
-            let aiSpeedCap = v.maxSpeed * 0.9;
+            let aiSpeedCap = v.maxSpeed * 0.9 * passiveSpeed(v);
             if(playerStats.aiDifficulty === "easy") aiSpeedCap *= 0.75;
             if(playerStats.aiDifficulty === "hell") aiSpeedCap *= 1.15;
             if(isExtreme()) {
-                aiSpeedCap *= 1.25;
+                aiSpeedCap *= 1.5;
                 const pl = vehicles[0], gap = (pl.lap + pl.progress) - (v.lap + v.progress);
-                if(gap > 0) aiSpeedCap *= 1 + Math.min(0.12, gap * 1.5); // 플레이어가 앞서면 AI가 더 빨라지는 고무줄
+                if(gap > 0) aiSpeedCap *= 1 + Math.min(0.35, gap * 3); // 플레이어가 앞서면 AI가 더 빨라지는 고무줄
             }
-            if(v.slowTimer > 0) { aiSpeedCap *= 0.5; v.slowTimer -= delta * (isExtreme() ? 1.5 : 1); }
+            if(v.slowTimer > 0) { aiSpeedCap *= 0.5; v.slowTimer -= delta * (isExtreme() ? 3 : 1); }
 
             v.speed = THREE.MathUtils.lerp(v.speed, aiSpeedCap, Math.min(1, 0.05 * f));
             v.mesh.rotation.y = v.heading;
             v.mesh.translateZ(v.speed * delta * 1.5);
 
-            if(v.heldItem && Math.random() < (isExtreme() ? 0.5 : 0.3) * delta) {
+            if(v.heldItem && Math.random() < (isExtreme() ? 1.2 : 0.3) * delta) {
                 useHeldItem(v);
                 if(isExtreme()) {
                     const p = vehicles[0];
-                    if(p && !p.shieldActive && !playerStats.adm.god && p.mesh.position.distanceTo(v.mesh.position) < 150 && Math.random() < 0.2) {
-                        p.stunTimer = 0.8; showGameMessage("😈 익스트림 AI의 공격!");
+                    if(p && !p.shieldActive && !playerStats.adm.god && p.mesh.position.distanceTo(v.mesh.position) < 150 && Math.random() < 0.5) {
+                        p.stunTimer = 1.2; showGameMessage("😈 익스트림 AI의 공격!");
                     }
                 }
             }
@@ -1416,6 +1503,7 @@
         }
 
         function onLapChanged(v) {
+            if(P(v).lapBoost && v.lap >= 1 && v.lap <= TOTAL_LAPS) triggerBoost(v, 1.5, 2);
             if(v.lap > TOTAL_LAPS) {
                 // [수정] AI가 결승선을 넘어도 게임이 멈추지 않음. 플레이어 완주 때만 레이스 종료
                 if(!v.finished) {
@@ -1503,6 +1591,11 @@
         function useHeldItem(v) {
             const item = v.heldItem;
             fxFromPlayer = !!v.isPlayer;
+            if(teamMode()) {
+                const saved = [];
+                vehicles.forEach(o => { if(o !== v && o.team >= 0 && o.team === v.team) { saved.push([o, o.shieldActive]); o.shieldActive = true; } });
+                setTimeout(() => saved.forEach(([o, s]) => { o.shieldActive = s; }), 0);
+            }
             v.heldItem = (v.isPlayer && playerStats.adm.inf) ? item : null;
             if(v.isPlayer) updateItemHUD(v.heldItem);
 
@@ -1597,7 +1690,7 @@
                     break;
                 case 'bomb':
                     vehicles.forEach(other => {
-                        if(other !== v && other.mesh.position.distanceTo(v.mesh.position) < 25) {
+                        if(other !== v && !other.shieldActive && other.mesh.position.distanceTo(v.mesh.position) < 25) {
                             other.stunTimer = 1.5;
                         }
                     });
@@ -1607,7 +1700,7 @@
 
         function triggerBoost(v, multiplier, duration) {
             v.boostMultiplier = multiplier;
-            v.boostTimer = duration;
+            v.boostTimer = duration * (P(v).boostLong || 1);
             playSound('boost');
         }
 
@@ -1651,15 +1744,15 @@
 
             if(selectedIdx === qObj.a) {
                 resultBox.className = "mb-4 p-3 rounded-xl text-sm font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
-                resultBox.textContent = `⭕ 정답입니다! [황금 부스터 ${isExtreme() ? 4 : 5}초!]`;
+                resultBox.textContent = `⭕ 정답입니다! [황금 부스터 ${isExtreme() ? 3 : 5}초!]`;
                 
                 // Reward Player
-                triggerBoost(vehicles[0], 3.0, isExtreme() ? 4 : 5);
+                triggerBoost(vehicles[0], 3.0, isExtreme() ? 3 : 5);
                 playSound('go');
             } else {
                 resultBox.className = "mb-4 p-3 rounded-xl text-sm font-bold bg-red-500/20 text-red-300 border border-red-500/40";
-                resultBox.textContent = `❌ 오답입니다! ${isExtreme() ? 6 : 5}초 스턴! 해설: ${qObj.exp}`;
-                if(!playerStats.adm.god) vehicles[0].stunTimer = isExtreme() ? 6 : 5;
+                resultBox.textContent = `❌ 오답입니다! ${isExtreme() ? 10 : 5}초 스턴! 해설: ${qObj.exp}`;
+                if(!playerStats.adm.god) vehicles[0].stunTimer = isExtreme() ? 10 : 5;
                 playSound('beep');
             }
 
@@ -1677,19 +1770,69 @@
         /* =========================================================================
            8. ADMIN / MANAGEMENT MODE
            ========================================================================= */
+        // ===== 관리자 인증 (비밀번호는 코드에 저장하지 않고 해시만 보관) =====
+        const ADMIN_SALT = 'hsg-7f3a91c2', ADMIN_HASH = '190fce374b62bf2c2622b25cd3fa9e5e8ad641ae167558abe99ff169a30e4058';
+        let adminFails = 0, adminLockUntil = 0;
+        const SHA = (() => {
+            const pr = []; for(let n = 2; pr.length < 64; n++) if(pr.every(p => n % p)) pr.push(n);
+            const K = pr.map(p => Math.floor((Math.cbrt(p) % 1) * 4294967296)), H0 = pr.slice(0, 8).map(p => Math.floor((Math.sqrt(p) % 1) * 4294967296));
+            const rr = (x, n) => (x >>> n) | (x << (32 - n));
+            return (s) => {
+                const b = [...new TextEncoder().encode(s)], l = b.length * 8; b.push(0x80);
+                while(b.length % 64 !== 56) b.push(0);
+                for(let i = 7; i >= 0; i--) b.push(i > 3 ? 0 : (l >>> (i * 8)) & 255);
+                const H = H0.slice();
+                for(let o = 0; o < b.length; o += 64) {
+                    const w = new Array(64);
+                    for(let i = 0; i < 16; i++) w[i] = (b[o + 4 * i] << 24) | (b[o + 4 * i + 1] << 16) | (b[o + 4 * i + 2] << 8) | b[o + 4 * i + 3];
+                    for(let i = 16; i < 64; i++) {
+                        const s0 = rr(w[i - 15], 7) ^ rr(w[i - 15], 18) ^ (w[i - 15] >>> 3), s1 = rr(w[i - 2], 17) ^ rr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+                        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) | 0;
+                    }
+                    let [a, c, d, e, f, g, h, k] = [H[0], H[1], H[2], H[3], H[4], H[5], H[6], H[7]];
+                    for(let i = 0; i < 64; i++) {
+                        const S1 = rr(f, 6) ^ rr(f, 11) ^ rr(f, 25), ch = (f & g) ^ (~f & h), t1 = (k + S1 + ch + K[i] + w[i]) | 0;
+                        const S0 = rr(a, 2) ^ rr(a, 13) ^ rr(a, 22), mj = (a & c) ^ (a & d) ^ (c & d), t2 = (S0 + mj) | 0;
+                        k = h; h = g; g = f; f = (e + t1) | 0; e = d; d = c; c = a; a = (t1 + t2) | 0;
+                    }
+                    [a, c, d, e, f, g, h, k].forEach((v, i) => { H[i] = (H[i] + v) | 0; });
+                }
+                return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+            };
+        })();
+        function pinOk(v) { let x = SHA(ADMIN_SALT + v); for(let i = 0; i < 3000; i++) x = SHA(x + ADMIN_SALT); return x === ADMIN_HASH; }
+
+        function askAdminPin(onOk, onFail) {
+            if(Date.now() < adminLockUntil) { alert(`잠시 후 다시 시도하세요 (${Math.ceil((adminLockUntil - Date.now()) / 1000)}초)`); if(onFail) onFail(); return; }
+            const wrap = document.createElement('div');
+            wrap.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.8);display:flex;align-items:center;justify-content:center';
+            const box = document.createElement('div');
+            box.style.cssText = 'background:#111827;padding:20px;border-radius:16px;color:#fff;text-align:center;min-width:240px;font-family:sans-serif';
+            const title = document.createElement('div'); title.textContent = '🔒 관리자 인증'; title.style.cssText = 'font-weight:bold;margin-bottom:10px';
+            const inp = document.createElement('input');
+            inp.type = 'password'; inp.setAttribute('inputmode', 'numeric'); inp.setAttribute('autocomplete', 'off'); inp.maxLength = 12;
+            inp.style.cssText = 'width:100%;box-sizing:border-box;padding:10px;border-radius:10px;text-align:center;color:#000;font-size:22px;letter-spacing:8px';
+            const row = document.createElement('div'); row.style.cssText = 'margin-top:12px;display:flex;gap:8px';
+            const mkBtn = (t, bg) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'flex:1;padding:8px;border-radius:10px;font-weight:bold;color:#fff;background:' + bg; return b; };
+            const ok = mkBtn('확인', '#7c3aed'), cancel = mkBtn('취소', '#4b5563');
+            const close = () => wrap.remove();
+            const submit = () => {
+                const v = inp.value; close();
+                if(pinOk(v)) { adminFails = 0; onOk(); }
+                else if(++adminFails >= 3) { adminFails = 0; adminLockUntil = Date.now() + 30000; alert('3회 실패했습니다. 30초 동안 잠깁니다.'); if(onFail) onFail(); }
+                else { alert('비밀번호가 올바르지 않습니다.'); if(onFail) onFail(); }
+            };
+            ok.onclick = submit; cancel.onclick = () => { close(); if(onFail) onFail(); };
+            inp.addEventListener('keydown', e => { e.stopPropagation(); if(e.key === 'Enter') submit(); else if(e.key === 'Escape') { close(); if(onFail) onFail(); } });
+            row.appendChild(ok); row.appendChild(cancel); box.appendChild(title); box.appendChild(inp); box.appendChild(row); wrap.appendChild(box);
+            document.body.appendChild(wrap); inp.focus();
+        }
+
         function toggleAdminPanel() {
             const modal = document.getElementById("admin-modal");
-            if(modal.classList.contains("hidden")) {
-                const pw = prompt("관리자 비밀번호를 입력하세요:");
-                if(pw === "0725") {
-                    buildAdminExtras();
-                    modal.classList.remove("hidden");
-                } else if(pw !== null) {
-                    alert("비밀번호가 올바르지 않습니다.");
-                }
-            } else {
-                modal.classList.add("hidden");
-            }
+            if(!modal.classList.contains("hidden")) { modal.classList.add("hidden"); return; }
+            const open = () => { playerStats.adminCar = true; buildAdminExtras(); modal.classList.remove("hidden"); };
+            if(playerStats.adminCar) open(); else askAdminPin(open);
         }
 
         function adminAddCoins(amt) {
@@ -1726,6 +1869,7 @@
             const playerRank = sorted.indexOf(vehicles[0]) + 1;
             dom.rank.innerHTML = `${playerRank}<span class="text-lg text-white">/${vehicles.length}</span>`;
             drawMinimap(sorted);
+            updateTeamHUD(sorted);
         }
 
         function drawMinimap(sortedVehicles) {
@@ -1756,7 +1900,7 @@
                 const p = v.mesh.position;
                 ctx.beginPath();
                 ctx.arc(mx(p.x), mz(p.z), v.isPlayer ? 5 : 3, 0, Math.PI * 2);
-                ctx.fillStyle = v.isPlayer ? "#00ffff" : "#ff3366";
+                ctx.fillStyle = v.team >= 0 ? "#" + TEAM_DEF[v.team].c.toString(16).padStart(6, "0") : (v.isPlayer ? "#00ffff" : "#ff3366");
                 ctx.fill();
             });
         }
@@ -1799,6 +1943,38 @@
             document.getElementById("hud-time").textContent = `${mins}:${secs}.${ms}`;
         }
 
+        // ===== 자동 저장 (코인, 차량, 맵, 난이도, 업그레이드, 해금, 관리자 카) =====
+        const SAVE_KEY = 'hsg_save_v1';
+        function saveGame() {
+            try {
+                const p = playerStats;
+                localStorage.setItem(SAVE_KEY, JSON.stringify({ coins: p.coins, selectedCar: p.selectedCar, selectedMap: p.selectedMap, aiDifficulty: p.aiDifficulty, upgrades: p.upgrades, unlockedCars: p.unlockedCars, teamMode: p.teamMode }));
+            } catch(e) {}
+        }
+        function loadGame() {
+            const p = playerStats;
+            try {
+                const d = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null');
+                if(d) {
+                    if(Number.isFinite(d.coins)) p.coins = d.coins;
+                    if(d.selectedCar >= 0 && d.selectedCar < CAR_DATA.length) p.selectedCar = d.selectedCar;
+                    if(d.selectedMap >= 0 && d.selectedMap < MAP_DATA.length) p.selectedMap = d.selectedMap;
+                    if(['easy', 'normal', 'hard', 'hell', 'extreme'].includes(d.aiDifficulty)) p.aiDifficulty = d.aiDifficulty;
+                    if(d.upgrades) ['engine', 'booster', 'tire'].forEach(k => { if(Number.isFinite(d.upgrades[k])) p.upgrades[k] = d.upgrades[k]; });
+                    if(Array.isArray(d.unlockedCars)) p.unlockedCars = CAR_DATA.map((c, i) => !!d.unlockedCars[i] || i === 0);
+                    if([0, 2, 4].includes(d.teamMode)) p.teamMode = d.teamMode;
+                }
+                localStorage.removeItem('hsg_admin_car'); // 예전 버전의 해금 기록 삭제
+            } catch(e) {}
+            if(CAR_DATA[p.selectedCar].reward && !p.adminCar) p.selectedCar = 0;
+        }
+        function refreshSavedUI() {
+            updateCoinDisplay(); updateCarUI(); updateMapUI();
+            const sel = document.getElementById('ai-difficulty-select'); if(sel) sel.value = playerStats.aiDifficulty;
+            const ts = document.getElementById('team-mode-select'); if(ts) ts.value = String(playerStats.teamMode);
+            ['engine', 'booster', 'tire'].forEach(k => { const e = document.getElementById('lvl-' + k); if(e) e.textContent = `Lv.${playerStats.upgrades[k]}`; });
+        }
+
         function updateCoinDisplay() {
             document.getElementById("menu-coins").innerHTML = `<i class="fa-solid fa-coins mr-1"></i>${playerStats.coins}`;
         }
@@ -1823,19 +1999,27 @@
             document.getElementById("menu-map-name").textContent = m.name;
         }
 
+        function guardAdminCar(prevSel) {
+            if(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar) {
+                askAdminPin(() => { playerStats.adminCar = true; updateCarUI(); }, () => { playerStats.selectedCar = prevSel; updateCarUI(); });
+            }
+        }
         function nextCar() {
-            do { playerStats.selectedCar = (playerStats.selectedCar + 1) % CAR_DATA.length; } while(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar);
+            const prevSel = playerStats.selectedCar; playerStats.selectedCar = (playerStats.selectedCar + 1) % CAR_DATA.length; guardAdminCar(prevSel);
             updateCarUI();
         }
         function prevCar() {
-            do { playerStats.selectedCar = (playerStats.selectedCar - 1 + CAR_DATA.length) % CAR_DATA.length; } while(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar);
+            const prevSel = playerStats.selectedCar; playerStats.selectedCar = (playerStats.selectedCar - 1 + CAR_DATA.length) % CAR_DATA.length; guardAdminCar(prevSel);
             updateCarUI();
         }
         function updateCarUI() {
             const c = CAR_DATA[playerStats.selectedCar];
-            document.getElementById("car-title").textContent = c.name;
+            document.getElementById("car-title").textContent = (c.reward && !playerStats.adminCar ? "🔒 " : "") + c.name;
+            const ps = PASSIVES[c.id], ct = document.getElementById("car-title");
+            if(!dom.pas) { dom.pas = document.createElement('div'); dom.pas.className = 'text-xs text-amber-300 mt-1'; if(ct.insertAdjacentElement) ct.insertAdjacentElement('afterend', dom.pas); }
+            dom.pas.textContent = ps ? `✨ 패시브: ${ps.name} — ${ps.desc}` : "";
             document.getElementById("car-stat-speed").textContent = `${c.topSpeed * 4} km/h`;
-            document.getElementById("menu-car-name").textContent = c.name;
+            document.getElementById("menu-car-name").textContent = (c.reward && !playerStats.adminCar ? "🔒 " : "") + c.name;
         }
 
         function updateDifficulty(val) {
@@ -1889,13 +2073,16 @@
             document.getElementById("result-title").textContent = rank === 1 ? "🏆 VICTORY!" : (rank <= 3 ? "🥈 PODIUM!" : "🏁 FINISH!");
             let ext = '';
             if(isExtreme() && rank === 1) {
-                const first = !playerStats.adminCar;
-                playerStats.adminCar = true;
-                try { localStorage.setItem('hsg_admin_car', '1'); } catch(e) {}
-                ext = first ? ' · 🔓 관리자 카 해금!' : ' · ☠️ 익스트림 클리어!';
-                if(first) setTimeout(() => alert("🎉 익스트림 클리어! 관리자 자동차를 획득했습니다.\n메인 메뉴 차량 선택 화살표로 선택하세요. (최고속도 500)"), 400);
+                ext = ' · ☠️ 익스트림 클리어!';
             }
-            document.getElementById("result-rank-text").textContent = `최종 순위: ${rank}위${ext}`;
+            let teamTxt = '';
+            if(teamMode()) {
+                const T = teamScores(rankVehicles()), myTeam = v.team, win = T[0].i === myTeam && (T.length < 2 || T[0].total > T[1].total);
+                if(win) { playerStats.coins += 500; updateCoinDisplay(); }
+                teamTxt = '\n' + T.map((t, i) => `${i + 1}위 ${TEAM_DEF[t.i].e} ${TEAM_DEF[t.i].n}: ${t.total}점 (순위 ${t.pts} + 코인 ${t.coins})`).join('\n') + '\n' + (win ? '🏆 우리 팀 승리! +500 코인' : (T[0].total === (T[1] ? T[1].total : -1) ? '🤝 팀 무승부' : '😢 우리 팀 패배'));
+            }
+            const rt = document.getElementById("result-rank-text"); rt.style.whiteSpace = "pre-line";
+            rt.textContent = `최종 순위: ${rank}위${ext}${teamTxt}`;
             document.getElementById("res-coin-base").textContent = `+${base}`;
             document.getElementById("res-coin-drift").textContent = `+${driftBonus}`;
             document.getElementById("res-coin-total").textContent = `💰 ${earned}`;
@@ -1924,23 +2111,28 @@
 
         function kartTick(v, delta) {
             if(v.remote) return;
+            if(P(v).regen && !v.heldItem) { v.regenT = (v.regenT || 0) + delta; if(v.regenT >= P(v).regen) { v.regenT = 0; giveRandomItem(v); } }
             v.padCd = (v.padCd || 0) - delta;
             if(v.padCd <= 0) {
                 for(const p of kartPads) {
                     if(Math.abs(p.x - v.mesh.position.x) < 7 && Math.abs(p.z - v.mesh.position.z) < 7) { triggerBoost(v, 1.7, 1.2); v.padCd = 1.5; break; }
                 }
             }
-            if(!v.isPlayer) return;
+            if(v.isPlayer) kartCoins.forEach(c => { if(!c.visible) { c.userData.t -= delta; if(c.userData.t <= 0) c.visible = true; } else c.rotation.y += delta * 4; });
             kartCoins.forEach(c => {
-                if(!c.visible) { c.userData.t -= delta; if(c.userData.t <= 0) c.visible = true; return; }
-                c.rotation.y += delta * 4;
-                if(Math.abs(c.position.x - v.mesh.position.x) < 3 && Math.abs(c.position.z - v.mesh.position.z) < 3) {
+                if(!c.visible) return;
+                const R = 3 + (P(v).magnet || 0);
+                if(Math.abs(c.position.x - v.mesh.position.x) < R && Math.abs(c.position.z - v.mesh.position.z) < R) {
                     c.visible = false; c.userData.t = 8;
-                    v.kcoins = Math.min(15, (v.kcoins || 0) + 1);
-                    playerStats.coins += 2; playSound('itemGet');
-                    if(v.boostTimer <= 0) { v.boostMultiplier = 1.12; v.boostTimer = 0.6; }
+                    v.tcoins = (v.tcoins || 0) + (P(v).coinPlus ? 2 : 1);
+                    if(v.isPlayer) {
+                        v.kcoins = Math.min(15, (v.kcoins || 0) + 1);
+                        playerStats.coins += 2; playSound('itemGet');
+                        if(v.boostTimer <= 0) { v.boostMultiplier = 1.12; v.boostTimer = 0.6; }
+                    }
                 }
             });
+            if(!v.isPlayer) return;
             if(!dom.kc) { dom.kc = document.createElement('div'); dom.kc.className = 'fixed top-24 left-3 text-yellow-300 font-black text-xl z-30'; document.body.appendChild(dom.kc); }
             dom.kc.textContent = `🪙 ${v.kcoins || 0}/15 · 속도 +${(v.kcoins || 0) * 3}%`;
             // 미니터보 드리프트 불꽃 (파랑 → 주황 → 분홍)
@@ -2039,6 +2231,13 @@
                 ['engine', 'booster', 'tire'].forEach(k => { playerStats.upgrades[k] = 10; const e = document.getElementById('lvl-' + k); if(e) e.textContent = 'Lv.10'; });
                 alert("모든 차량 해금, 업그레이드 Lv.10 (다음 레이스부터 적용)");
             });
+            mk("🔒 관리자 로그아웃", () => {
+                playerStats.adminCar = false; playerStats.godMode = false; Object.keys(playerStats.adm).forEach(k => { playerStats.adm[k] = false; });
+                if(CAR_DATA[playerStats.selectedCar].reward) { playerStats.selectedCar = 0; updateCarUI(); }
+                document.getElementById("admin-modal").classList.add("hidden"); const x = document.getElementById("adm-extra"); if(x) x.remove();
+                alert("로그아웃되었습니다.");
+            });
+            mk("🗑️ 저장 데이터 초기화", () => { if(confirm("코인, 해금, 관리자 카 등 모든 저장 기록이 삭제됩니다. 계속할까요?")) { try { localStorage.removeItem(SAVE_KEY); localStorage.removeItem("hsg_admin_car"); } catch(e) {} window.removeEventListener("beforeunload", saveGame); location.reload(); } });
             mk("💰 +99999 코인", () => { playerStats.coins += 99999; updateCoinDisplay(); });
             ALL_ITEMS.forEach(it => mk(`🎁 ${it}`, () => { if(live()) adminGiveItem(it); }));
             host.appendChild(box);
@@ -2307,9 +2506,26 @@
             dom.driftScore = document.getElementById("drift-score");
             dom.minimapCtx = document.getElementById("minimapCanvas").getContext("2d");
 
-            try { if(localStorage.getItem('hsg_admin_car') === '1') playerStats.adminCar = true; } catch(e) {}
+            loadGame();
+            const ds = document.getElementById('ai-difficulty-select');
+            if(ds) {
+                const box = ds.parentElement.cloneNode(false);
+                box.innerHTML = '<span class="text-xs text-gray-400 block">경기 방식</span><select id="team-mode-select" class="bg-transparent text-sm font-bold text-purple-300 focus:outline-none text-center cursor-pointer"><option value="0" class="bg-slate-900">개인전</option><option value="2" class="bg-slate-900">🔴🔵 2팀전 (4:4)</option><option value="4" class="bg-slate-900">4팀전 (2:2)</option></select>';
+                ds.parentElement.insertAdjacentElement('afterend', box);
+                document.getElementById('team-mode-select').onchange = e => { playerStats.teamMode = +e.target.value; };
+            }
+            ['menu-coins', 'hud-rank'].forEach(id => { // 비밀 진입: 2초 길게 누르기
+                const el = document.getElementById(id); if(!el) return;
+                let tm; const down = () => { clearTimeout(tm); tm = setTimeout(toggleAdminPanel, 2000); }, up = () => clearTimeout(tm);
+                ['mousedown', 'touchstart'].forEach(ev => el.addEventListener(ev, down));
+                ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => el.addEventListener(ev, up));
+            });
             initThreeEngine();
             updateCoinDisplay();
+            refreshSavedUI();
+            setInterval(saveGame, 2000);
+            window.addEventListener('beforeunload', saveGame);
+            document.addEventListener('visibilitychange', () => { if(document.hidden) saveGame(); });
             window.addEventListener('keydown', e => {
                 const em = { Digit1: '👍', Digit2: '😂', Digit3: '😡', Digit4: '🏆' }[e.code];
                 if(!em || !vehicles.length || (gameState !== "RACING" && gameState !== "COUNTDOWN")) return;
