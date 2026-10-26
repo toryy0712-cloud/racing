@@ -1,0 +1,2333 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>후삼국 히스토리 챔피언십 3D</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Supabase (멀티플레이: Realtime Broadcast + 방 목록) -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #0d0f18;
+            color: #fff;
+        }
+
+        .font-title {
+            font-family: 'Black Han Sans', sans-serif;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Glassmorphism UI elements */
+        .glass-panel {
+            background: rgba(18, 22, 36, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .glass-button {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+        .glass-button:active {
+            transform: scale(0.95);
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Touch controls styles */
+        .touch-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            border-radius: 9999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            transition: background 0.1s;
+        }
+        .touch-btn:active, .touch-btn.active {
+            background: rgba(255, 215, 0, 0.6);
+            border-color: #ffd700;
+        }
+
+        /* Speedometer gauge animation */
+        .speedometer-bg {
+            stroke: rgba(255, 255, 255, 0.1);
+        }
+        .speedometer-fill {
+            stroke-dasharray: 283;
+            stroke-dashoffset: 283;
+            transition: stroke-dashoffset 0.1s linear, stroke 0.3s ease;
+        }
+
+        /* Boost Flash Effect */
+        #speed-effect {
+            pointer-events: none;
+            position: absolute;
+            inset: 0;
+            z-index: 5;
+            opacity: 0;
+            transition: opacity 0.3s;
+            background: radial-gradient(circle, transparent 50%, rgba(0, 191, 255, 0.3) 90%, rgba(0, 255, 255, 0.6) 100%);
+        }
+
+        /* Drift Smoke Canvas Layer */
+        .shake-screen {
+            animation: shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-2px, 0, 0); }
+            20%, 80% { transform: translate3d(4px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-6px, 0, 0); }
+            40%, 60% { transform: translate3d(6px, 0, 0); }
+        }
+
+        /* Minimap canvas */
+        #minimapCanvas {
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            background: rgba(0,0,0,0.5);
+        }
+    </style>
+</head>
+<body class="select-none overflow-hidden">
+
+    <!-- 3D Render Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- Speed Effect Overlay -->
+    <div id="speed-effect"></div>
+
+    <!-- Main Game HUD (In-Game Overlay) -->
+    <div id="hud" class="hidden absolute inset-0 pointer-events-none z-10 flex flex-col justify-between p-4">
+        <!-- Top HUD Row -->
+        <div class="flex justify-between items-start w-full">
+            <!-- Rank & Lap Info -->
+            <div class="glass-panel p-3 rounded-2xl flex items-center space-x-4 pointer-events-auto">
+                <div class="text-center">
+                    <span class="text-xs text-gray-400 block uppercase font-bold">순위</span>
+                    <span id="hud-rank" class="text-3xl font-title text-amber-400">1<span class="text-lg text-white">/8</span></span>
+                </div>
+                <div class="h-8 w-px bg-gray-600"></div>
+                <div class="text-center">
+                    <span class="text-xs text-gray-400 block uppercase font-bold">바퀴</span>
+                    <span id="hud-lap" class="text-2xl font-title text-emerald-400">1 / 2</span>
+                </div>
+                <div class="h-8 w-px bg-gray-600"></div>
+                <div class="text-center">
+                    <span class="text-xs text-gray-400 block uppercase font-bold">시간</span>
+                    <span id="hud-time" class="text-xl font-mono text-cyan-300">00:00.0</span>
+                </div>
+            </div>
+
+            <!-- Quiz Trigger Button & Item Box Container -->
+            <div class="flex items-center space-x-3 pointer-events-auto">
+                <!-- History Quiz Button -->
+                <button id="quiz-btn" onclick="openQuizModal()" class="glass-button bg-amber-500/30 hover:bg-amber-500/50 text-amber-300 border-amber-400/50 px-4 py-2.5 rounded-2xl flex items-center space-x-2 shadow-lg animate-pulse">
+                    <i class="fa-solid fa-scroll text-xl"></i>
+                    <span class="font-bold text-sm hidden sm:inline">역사 퀴즈!</span>
+                </button>
+
+                <!-- Current Held Item -->
+                <div class="relative">
+                    <div id="item-slot" class="w-16 h-16 sm:w-20 sm:h-20 glass-panel rounded-2xl flex items-center justify-center text-3xl sm:text-4xl border-2 border-yellow-400/60 shadow-xl bg-black/40">
+                        <span id="item-icon" class="opacity-30">❓</span>
+                    </div>
+                    <span class="text-[10px] bg-black/80 text-gray-300 px-1.5 py-0.5 rounded absolute -bottom-2 left-1/2 -translate-x-1/2 whitespace-nowrap">아이템</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center Notification Message -->
+        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
+            <div id="game-message" class="text-3xl sm:text-5xl font-title text-yellow-300 drop-shadow-[0_5px_5px_rgba(0,0,0,0.8)] transition-all duration-300 scale-0 opacity-0">
+                START!
+            </div>
+            <div id="drift-score" class="text-xl font-bold text-cyan-400 drop-shadow mt-1 opacity-0 transition-opacity">
+                DRIFT +100
+            </div>
+        </div>
+
+        <!-- Countdown Display -->
+        <div id="countdown-overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
+            <span id="countdown-text" class="text-8xl sm:text-9xl font-title text-yellow-400 drop-shadow-[0_10px_20px_rgba(0,0,0,0.9)] animate-ping opacity-0">3</span>
+        </div>
+
+        <!-- Bottom HUD Row -->
+        <div class="flex justify-between items-end w-full">
+            <!-- Minimap -->
+            <div class="pointer-events-auto relative">
+                <canvas id="minimapCanvas" width="120" height="120"></canvas>
+            </div>
+
+            <!-- Speedometer & Boost Gauge -->
+            <div class="flex flex-col items-center pointer-events-auto">
+                <div class="relative w-28 h-28 sm:w-36 sm:h-36 flex items-center justify-center">
+                    <svg class="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                        <circle class="speedometer-bg" cx="50" cy="50" r="45" stroke-width="8" fill="none"></circle>
+                        <circle id="speed-gauge" class="speedometer-fill stroke-cyan-400" cx="50" cy="50" r="45" stroke-width="8" fill="none"></circle>
+                    </svg>
+                    <div class="absolute flex flex-col items-center">
+                        <span id="speed-num" class="text-2xl sm:text-4xl font-title text-white">0</span>
+                        <span class="text-[10px] text-gray-400 font-bold uppercase tracking-widest">km/h</span>
+                    </div>
+                </div>
+
+                <!-- Boost Bar -->
+                <div class="w-32 sm:w-44 bg-gray-900/80 h-3.5 rounded-full overflow-hidden border border-gray-600/50 mt-1 p-0.5">
+                    <div id="boost-bar-fill" class="h-full bg-gradient-to-r from-cyan-500 via-indigo-500 to-amber-400 rounded-full w-0 transition-all duration-100"></div>
+                </div>
+                <span class="text-[10px] text-cyan-300 font-bold mt-0.5">BOOST GAUGE</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- On-Screen Mobile Touch Controls Overlay -->
+    <div id="touch-controls" class="hidden absolute inset-0 z-20 pointer-events-none flex justify-between p-4 items-end">
+        <!-- Left Side: Steering Buttons -->
+        <div class="flex space-x-3 pointer-events-auto mb-2">
+            <button id="btn-left" class="touch-btn w-16 h-16 sm:w-20 sm:h-20"><i class="fa-solid fa-arrow-left"></i></button>
+            <button id="btn-right" class="touch-btn w-16 h-16 sm:w-20 sm:h-20"><i class="fa-solid fa-arrow-right"></i></button>
+        </div>
+
+        <!-- Right Side: Action Buttons -->
+        <div class="grid grid-cols-3 gap-2 pointer-events-auto mb-2">
+            <button id="btn-drift" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 bg-cyan-600/40 text-sm font-bold">드리프트</button>
+            <button id="btn-item" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 bg-yellow-600/40 text-lg"><i class="fa-solid fa-box-open"></i></button>
+            <button id="btn-boost" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 bg-amber-600/40 text-lg"><i class="fa-solid fa-bolt"></i></button>
+            <button id="btn-brake" class="touch-btn w-14 h-14 sm:w-16 sm:h-16 bg-red-600/40 col-span-1 text-sm font-bold">후진</button>
+            <button id="btn-gas" class="touch-btn w-28 h-14 sm:w-32 sm:h-16 bg-emerald-600/50 col-span-2 text-base font-bold"><i class="fa-solid fa-gauge-high mr-1"></i> 가속</button>
+        </div>
+    </div>
+
+    <!-- MAIN MENU UI OVERLAY -->
+    <div id="main-menu" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4">
+        <div class="max-w-4xl w-full glass-panel p-6 sm:p-8 rounded-3xl border border-white/20 flex flex-col max-h-[90vh] overflow-y-auto">
+            <!-- Header -->
+            <div class="text-center mb-6 relative">
+                <span class="inline-block px-3 py-1 bg-amber-500/20 text-amber-300 text-xs font-bold rounded-full mb-2 border border-amber-400/30">
+                    👑 초등 5학년 사회 연계 교육 레이싱
+                </span>
+                <h1 class="text-3xl sm:text-5xl font-title text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-amber-400 to-red-500 tracking-wider">
+                    후삼국 히스토리 챔피언십
+                </h1>
+                <p class="text-gray-300 text-xs sm:text-sm mt-1">왕건, 궁예, 견훤의 시대를 달리는 3D 아이템 레이스!</p>
+                
+                <!-- Admin Hidden Toggle Button (Top Right) -->
+                <button onclick="toggleAdminPanel()" class="absolute top-0 right-0 text-gray-500 hover:text-white p-2 text-xs">
+                    <i class="fa-solid fa-user-gear text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+                <div class="bg-black/40 p-3 rounded-2xl border border-white/10 text-center">
+                    <span class="text-xs text-gray-400 block">보유 코인</span>
+                    <span id="menu-coins" class="text-xl font-bold text-amber-400"><i class="fa-solid fa-coins mr-1"></i>0</span>
+                </div>
+                <div class="bg-black/40 p-3 rounded-2xl border border-white/10 text-center">
+                    <span class="text-xs text-gray-400 block">선택 자동차</span>
+                    <span id="menu-car-name" class="text-sm font-bold text-cyan-300">스포츠카</span>
+                </div>
+                <div class="bg-black/40 p-3 rounded-2xl border border-white/10 text-center">
+                    <span class="text-xs text-gray-400 block">선택 맵</span>
+                    <span id="menu-map-name" class="text-sm font-bold text-emerald-300">네온 미래 도시</span>
+                </div>
+                <div class="bg-black/40 p-3 rounded-2xl border border-white/10 text-center">
+                    <span class="text-xs text-gray-400 block">AI 난이도</span>
+                    <select id="ai-difficulty-select" onchange="updateDifficulty(this.value)" class="bg-transparent text-sm font-bold text-purple-300 focus:outline-none text-center cursor-pointer">
+                        <option value="easy" class="bg-slate-900">쉬움</option>
+                        <option value="normal" selected class="bg-slate-900">보통</option>
+                        <option value="hard" class="bg-slate-900">어려움</option>
+                        <option value="hell" class="bg-slate-900">지옥 (AI 최고)</option>
+                        <option value="extreme" class="bg-slate-900">☠️ 익스트림 (1등 클리어 시 관리자 카)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Main Tabs Container -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Map Selection Carousel -->
+                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <h3 class="text-base font-bold text-gray-200 mb-3 flex items-center">
+                        <i class="fa-solid fa-map-location-dot text-amber-400 mr-2"></i> 레이싱 맵 선택
+                    </h3>
+                    <div id="map-carousel" class="relative rounded-xl overflow-hidden bg-slate-900 h-40 flex items-center justify-center p-4 border border-white/10 text-center">
+                        <div id="map-info">
+                            <h4 id="map-title" class="text-2xl font-title text-amber-300 mb-1">🌆 네온 미래 도시</h4>
+                            <p id="map-desc" class="text-xs text-gray-300 max-w-xs">화려한 네온사인과 고속 직선 구간이 특징인 사이버펑크 도로.</p>
+                        </div>
+                        <button onclick="prevMap()" class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black p-2 rounded-full text-white"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button onclick="nextMap()" class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black p-2 rounded-full text-white"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+
+                <!-- Car Selection / Garage -->
+                <div class="bg-black/30 p-4 rounded-2xl border border-white/10 flex flex-col justify-between">
+                    <h3 class="text-base font-bold text-gray-200 mb-3 flex items-center justify-between">
+                        <span><i class="fa-solid fa-car text-cyan-400 mr-2"></i> 차고 & 차량 선택</span>
+                        <button onclick="openGarageModal()" class="text-xs text-cyan-300 hover:underline"><i class="fa-solid fa-wrench mr-1"></i>업그레이드</button>
+                    </h3>
+                    <div id="car-carousel" class="relative rounded-xl overflow-hidden bg-slate-900 h-40 flex items-center justify-center p-4 border border-white/10 text-center">
+                        <div id="car-info">
+                            <h4 id="car-title" class="text-xl font-title text-cyan-300 mb-1">🏎️ 스피드 에이스 (스포츠카)</h4>
+                            <div class="text-xs text-gray-300 space-y-1">
+                                <div>최고속도: <span id="car-stat-speed" class="text-amber-400">180 km/h</span></div>
+                                <div>가속력: <span id="car-stat-accel" class="text-emerald-400">보통</span> | 핸들링: <span id="car-stat-handling" class="text-indigo-400">우수</span></div>
+                            </div>
+                        </div>
+                        <button onclick="prevCar()" class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black p-2 rounded-full text-white"><i class="fa-solid fa-chevron-left"></i></button>
+                        <button onclick="nextCar()" class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black p-2 rounded-full text-white"><i class="fa-solid fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Start & Secondary Buttons -->
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button onclick="startRace()" class="flex-1 bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 hover:from-amber-400 hover:to-red-500 text-white font-title text-2xl py-4 rounded-2xl shadow-xl shadow-orange-950/50 transition transform active:scale-95 flex items-center justify-center">
+                    <i class="fa-solid fa-flag-checkered mr-3"></i> 레이스 시작!
+                </button>
+                <button onclick="openGarageModal()" class="glass-button px-6 py-4 rounded-2xl font-bold text-cyan-300 hover:bg-white/10">
+                    <i class="fa-solid fa-warehouse mr-2"></i> 차고 상점
+                </button>
+                <button onclick="openMissionsModal()" class="glass-button px-6 py-4 rounded-2xl font-bold text-emerald-300 hover:bg-white/10">
+                    <i class="fa-solid fa-list-check mr-2"></i> 일일 미션
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GARAGE & UPGRADE MODAL -->
+    <div id="garage-modal" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+        <div class="max-w-2xl w-full glass-panel p-6 rounded-3xl border border-white/20 flex flex-col max-h-[85vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-title text-cyan-300"><i class="fa-solid fa-wrench mr-2"></i> 자동차 성능 업그레이드</h2>
+                <button onclick="closeGarageModal()" class="text-gray-400 hover:text-white text-xl"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="space-y-4 mb-6">
+                <!-- Engine Upgrade -->
+                <div class="bg-black/40 p-4 rounded-2xl border border-white/10 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-amber-300"><i class="fa-solid fa-gauge mr-2"></i>엔진 (최고 속도)</div>
+                        <div class="text-xs text-gray-400 mt-0.5">현재 레벨: <span id="lvl-engine" class="text-white">Lv.1</span></div>
+                    </div>
+                    <button id="btn-upg-engine" onclick="upgradeStat('engine')" class="glass-button bg-amber-500/30 hover:bg-amber-500/50 text-amber-300 px-4 py-2 rounded-xl text-sm font-bold">
+                        업그레이드 (💰 200)
+                    </button>
+                </div>
+
+                <!-- Booster Upgrade -->
+                <div class="bg-black/40 p-4 rounded-2xl border border-white/10 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-indigo-300"><i class="fa-solid fa-bolt mr-2"></i>부스터 성능</div>
+                        <div class="text-xs text-gray-400 mt-0.5">현재 레벨: <span id="lvl-booster" class="text-white">Lv.1</span></div>
+                    </div>
+                    <button id="btn-upg-booster" onclick="upgradeStat('booster')" class="glass-button bg-indigo-500/30 hover:bg-indigo-500/50 text-indigo-300 px-4 py-2 rounded-xl text-sm font-bold">
+                        업그레이드 (💰 200)
+                    </button>
+                </div>
+
+                <!-- Tire Upgrade -->
+                <div class="bg-black/40 p-4 rounded-2xl border border-white/10 flex justify-between items-center">
+                    <div>
+                        <div class="font-bold text-emerald-300"><i class="fa-solid fa-compact-disc mr-2"></i>타이어 (핸들링/드리프트)</div>
+                        <div class="text-xs text-gray-400 mt-0.5">현재 레벨: <span id="lvl-tire" class="text-white">Lv.1</span></div>
+                    </div>
+                    <button id="btn-upg-tire" onclick="upgradeStat('tire')" class="glass-button bg-emerald-500/30 hover:bg-emerald-500/50 text-emerald-300 px-4 py-2 rounded-xl text-sm font-bold">
+                        업그레이드 (💰 200)
+                    </button>
+                </div>
+            </div>
+
+            <div class="text-right">
+                <button onclick="closeGarageModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2.5 rounded-xl font-bold text-sm">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DAILY MISSIONS MODAL -->
+    <div id="missions-modal" class="hidden absolute inset-0 z-40 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+        <div class="max-w-md w-full glass-panel p-6 rounded-3xl border border-white/20">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-title text-emerald-300"><i class="fa-solid fa-list-check mr-2"></i> 일일 미션</h2>
+                <button onclick="closeMissionsModal()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="missions-list" class="space-y-3 mb-6">
+                <!-- Mission items populated by JS -->
+            </div>
+            <button onclick="closeMissionsModal()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 rounded-xl font-bold text-sm">닫기</button>
+        </div>
+    </div>
+
+    <!-- HISTORY QUIZ MODAL -->
+    <div id="quiz-modal" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+        <div class="max-w-lg w-full glass-panel p-6 rounded-3xl border border-amber-500/40 shadow-2xl relative">
+            <div class="flex items-center space-x-3 mb-4">
+                <div class="p-3 bg-amber-500/20 text-amber-400 rounded-2xl border border-amber-500/30 text-2xl">
+                    <i class="fa-solid fa-scroll"></i>
+                </div>
+                <div>
+                    <span class="text-xs text-amber-400 font-bold uppercase">초등 5학년 역사 퀴즈</span>
+                    <h3 class="text-xl font-title text-white">후삼국 시대 탐구</h3>
+                </div>
+            </div>
+
+            <div id="quiz-question-container" class="mb-6">
+                <p id="quiz-question" class="text-lg font-bold text-gray-100 bg-black/40 p-4 rounded-2xl border border-white/10 mb-4 leading-relaxed">
+                    질문이 불러와지는 중...
+                </p>
+
+                <!-- Options -->
+                <div id="quiz-options" class="space-y-2">
+                    <!-- Option buttons populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Quiz Explanation Alert Area -->
+            <div id="quiz-result" class="hidden mb-4 p-3 rounded-xl text-sm font-bold"></div>
+
+            <div class="flex justify-end">
+                <button id="quiz-close-btn" onclick="closeQuizModal()" class="hidden bg-gray-600 hover:bg-gray-500 text-white px-5 py-2 rounded-xl text-sm font-bold">
+                    레이스로 복귀
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADMIN MODAL -->
+    <div id="admin-modal" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4">
+        <div class="max-w-xl w-full glass-panel p-6 rounded-3xl border border-purple-500/40 text-sm">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-title text-purple-300"><i class="fa-solid fa-user-shield mr-2"></i> 관리자(어드민) 모드</h2>
+                <button onclick="toggleAdminPanel()" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 mb-6">
+                <button onclick="adminAddCoins(5000)" class="bg-amber-600/40 hover:bg-amber-600 border border-amber-400/40 p-3 rounded-xl font-bold">💰 +5000 코인</button>
+                <button onclick="adminToggleGodMode()" id="btn-admin-god" class="bg-red-600/40 hover:bg-red-600 border border-red-400/40 p-3 rounded-xl font-bold">🛡️ 무적/무한부스터 [OFF]</button>
+                <button onclick="adminGiveItem('missile')" class="bg-blue-600/40 hover:bg-blue-600 border border-blue-400/40 p-2 rounded-xl">🚀 미사일 지급</button>
+                <button onclick="adminGiveItem('banana')" class="bg-yellow-600/40 hover:bg-yellow-600 border border-yellow-400/40 p-2 rounded-xl">🍌 바나나 지급</button>
+                <button onclick="adminGiveItem('shield')" class="bg-emerald-600/40 hover:bg-emerald-600 border border-emerald-400/40 p-2 rounded-xl">🛡️ 방어막 지급</button>
+                <button onclick="adminGiveItem('lightning')" class="bg-indigo-600/40 hover:bg-indigo-600 border border-indigo-400/40 p-2 rounded-xl">⚡ 번개 지급</button>
+                <button onclick="adminGiveItem('turbo')" class="bg-orange-600/40 hover:bg-orange-600 border border-orange-400/40 p-2 rounded-xl">💨 터보 지급</button>
+                <button onclick="adminGiveItem('ghost')" class="bg-purple-600/40 hover:bg-purple-600 border border-purple-400/40 p-2 rounded-xl">👻 유령 지급</button>
+            </div>
+
+            <button onclick="toggleAdminPanel()" class="w-full bg-purple-600 text-white py-2 rounded-xl font-bold">닫기</button>
+        </div>
+    </div>
+
+    <!-- RACE RESULT MODAL -->
+    <div id="result-modal" class="hidden absolute inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+        <div class="max-w-md w-full glass-panel p-6 rounded-3xl border border-yellow-400/50 text-center animate-bounce-in">
+            <div id="result-title" class="text-4xl font-title text-yellow-300 mb-2">🏆 VICTORY!</div>
+            <div id="result-rank-text" class="text-xl font-bold text-gray-200 mb-4">최종 순위: 1위</div>
+
+            <div class="bg-black/40 p-4 rounded-2xl border border-white/10 mb-6 space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-400">기본 획득 코인:</span>
+                    <span id="res-coin-base" class="font-bold text-amber-400">+500</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">드리프트 보너스:</span>
+                    <span id="res-coin-drift" class="font-bold text-amber-400">+100</span>
+                </div>
+                <div class="h-px bg-gray-700 my-1"></div>
+                <div class="flex justify-between text-base font-bold">
+                    <span>총 보상:</span>
+                    <span id="res-coin-total" class="text-amber-300">💰 600</span>
+                </div>
+            </div>
+
+            <button onclick="returnToMenu()" class="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white font-title text-xl py-3 rounded-2xl shadow-lg">
+                메인 메뉴로
+            </button>
+        </div>
+    </div>
+
+
+    <!-- GAME SCRIPT -->
+    <script>
+        /* =========================================================================
+           1. GAME DATA & STATE
+           ========================================================================= */
+        const QUIZ_DATABASE = [
+            { q: "후삼국을 통일하고 고려를 건국한 왕은 누구일까요?", options: ["왕건", "궁예", "견훤", "대조영"], a: 0, exp: "왕건은 918년 고려를 건국하고, 936년 후삼국을 통일했습니다." },
+            { q: "후백제를 건국한 인물은 누구일까요?", options: ["견훤", "궁예", "왕건", "경순왕"], a: 0, exp: "견훤은 완산주(전주)에 도읍을 정하고 후백제를 세웠습니다." },
+            { q: "후고구려(태봉)를 세웠으나 나중에 왕건에게 쫓겨난 인물은?", options: ["궁예", "견훤", "장보고", "대조영"], a: 0, exp: "궁예는 송악에 후고구려를 세웠으나 민심을 잃고 왕건에 의해 축출되었습니다." },
+            { q: "왕건이 고려의 도읍으로 정한 곳은 어디일까요?", options: ["개경 (개성)", "전주", "경주", "한성"], a: 0, exp: "왕건은 자신의 정치적 기반인 개경(개성)을 도읍으로 삼았습니다." },
+            { q: "견훤이 후백제의 도읍으로 삼은 완산주는 오늘날 어느 도시일까요?", options: ["전주", "광주", "나주", "대구"], a: 0, exp: "완산주는 오늘날 전라북도 전주시입니다." },
+            { q: "고려가 후삼국을 통일한 연도는 몇 년일까요?", options: ["936년", "918년", "900년", "668년"], a: 0, exp: "고려는 936년 신라 항복과 후백제 멸망을 거쳐 후삼국을 완성했습니다." },
+            { q: "궁예가 나라 이름을 '태봉'으로 바꾸고 옮긴 도읍은 어디일까요?", options: ["철원", "평양", "충주", "공주"], a: 0, exp: "궁예는 도읍을 철원으로 옮기고 국호를 태봉으로 변경했습니다." },
+            { q: "왕건이 후대 왕들에게 남긴 10가지 가르침의 이름은?", options: ["훈요 10조", "시무 28조", "화랑도", "성골남진"], a: 0, exp: "왕건은 나라를 잘 지키기 위한 지침으로 '훈요 10조'를 남겼습니다." },
+            { q: "왕건이 나주 전투에서 승리할 수 있도록 도운 인물은?", options: ["장화왕후 (오씨)", "선덕여왕", "기황후", "인현왕후"], a: 0, exp: "나주 오씨 가문의 도움을 받아 왕건은 수군을 이끌고 나주를 점령했습니다." },
+            { q: "신라의 마지막 왕으로 고려에 평화적으로 나라를 넘겨준 왕은?", options: ["경순왕", "진성여왕", "무열왕", "문무왕"], a: 0, exp: "신라 경순왕은 935년 고려 왕건에게 나라를 넘겨주었습니다." },
+            { q: "고려가 발해 유민들을 어떻게 대했을까요?", options: ["따뜻하게 받아들였다", "노비로 만들었다", "쫓아냈다", "가두었다"], a: 0, exp: "왕건은 발해 세자 대광현 등 발해 유민들을 동족으로 따뜻하게 맞이했습니다." },
+            { q: "후삼국 시대 신라의 수도였던 도시는 어디일까요?", options: ["경주", "부여", "공주", "한양"], a: 0, exp: "신라의 1천 년 수도는 금성(경주)입니다." },
+            { q: "왕건이 후백제와의 전투 중 신숭겸 등의 희생으로 목숨을 건진 전투는?", options: ["공주 공산성(대구) 전투", "일리천 전투", "나주 해전", "살수대첩"], a: 0, exp: "대구 공산 전투에서 신숭겸이 왕건의 옷을 입고 대신 전사하여 왕건이 피신했습니다." },
+            { q: "후삼국 통일의 결정적 계기가 된 고려와 후백제의 마지막 대전투는?", options: ["일리천 전투", "안시성 전투", "매소성 전투", "황산벌 전투"], a: 0, exp: "936년 구미 일리천 전투에서 고려군이 후백제군을 대파하고 통일을 이뤘습니다." },
+            { q: "고려라는 국호는 옛 어느 나라를 계승한다는 뜻을 담고 있을까요?", options: ["고구려", "백제", "신라", "가야"], a: 0, exp: "고려는 고구려의 기상을 계승한다는 의미로 지어졌습니다." },
+            { q: "궁예가 스스로를 가리켜 부르던 종교적 명칭은?", options: ["미륵불", "석가모니", "옥황상제", "단군"], a: 0, exp: "궁예는 자신이 세상에 온 미륵불이라 주장하며 독재를 펼쳤습니다." },
+            { q: "견훤이 신라 경주를 공격하여 죽게 한 신라의 왕은?", options: ["경애왕", "경순왕", "진성여왕", "효공왕"], a: 0, exp: "927년 견훤은 경주를 습격하여 경애왕을 죽게 했습니다." },
+            { q: "고려 왕건이 신라와 후백제를 대할 때 쓴 포용 정책의 명칭은?", options: ["민심 수습 및 융합 정책", "쇄국 정책", "강경 탄압 정책", "분할 통치"], a: 0, exp: "왕건은 신라에게 우호적 태도를 취하고 민심을 얻었습니다." },
+            { q: "견훤이 나중에 자신의 아들 신검에게 갇혔다가 탈출하여 찾아간 인물은?", options: ["왕건", "궁예", "경순왕", "이성계"], a: 0, exp: "견훤은 아들 신검에 의해 금산사에 갇혔다가 탈출하여 왕건에게 귀순했습니다." },
+            { q: "후삼국 시대 도로와 교통의 중심지였던 충주 지역의 고구려 비석은?", options: ["충주 고구려비", "광개토대왕능비", "단양 적성비", "북한산비"], a: 0, exp: "충주 고구려비는 한반도 중부의 중요 전략 요충지였음을 보여줍니다." },
+            { q: "후삼국 시대 고려의 군사 조직 중 왕의 호위 부대 역할을 한 사람들은?", options: ["친위군/마군", "화랑도", "삼별초", "별무반"], a: 0, exp: "왕건은 강력한 기병(마군)과 친위 세력을 바탕으로 공을 세웠습니다." },
+            { q: "왕건의 정략결혼 정책 목적은 무엇이었을까요?", options: ["지방 호족 세력 포섭", "재산 증식", "외국과의 교류", "신라의 전통 파괴"], a: 0, exp: "왕건은 전국 유력 호족의 딸들과 결혼하여 정국을 안정시켰습니다." },
+            { q: "왕건이 신라 왕족 및 호족에게 성씨를 내려준 제도는?", options: ["사성 제도", "골품제", "음서제", "과거제"], a: 0, exp: "왕건은 공을 세운 이들에게 '왕'씨 등의 성을 내리며 우대했습니다." },
+            { q: "궁예가 사람의 마음을 읽는다고 주장하며 사용한 기술 이름은?", options: ["관심법", "독심술", "유심론", "투시법"], a: 0, exp: "궁예는 '관심법'으로 신하들을 의심하고 처형했습니다." },
+            { q: "고려 시대 백성들의 세금 부담을 줄여주기 위해 정한 세율은?", options: ["취민유도 (10분의 1)", "2분의 1", "5분의 1", "전액 면제"], a: 0, exp: "왕건은 백성들의 삶을 위해 생산량의 1/10만 세금으로 거두게 했습니다." },
+            { q: "견훤의 아버지는 누구일까요?", options: ["아자개", "신검", "능환", "박술희"], a: 0, exp: "견훤의 아버지는 상주 지역의 호족이었던 아자개입니다." },
+            { q: "고려 건국 후 거란과의 관계는 어떠했나요?", options: ["발해를 멸망시켰으므로 배척함", "동맹을 맺음", "사신을 환영함", "조공을 바침"], a: 0, exp: "왕건은 같은 민족인 발해를 멸망시킨 거란을 매우 적대시했습니다 (낙타 사건)." },
+            { q: "후삼국 통일의 역사적 의의는 무엇일까요?", options: ["실질적인 민족의 재통합", "외세에 의한 통일", "신라의 영토 확장", "고구려의 독자적 멸망"], a: 0, exp: "후삼국 통일은 발해 유민까지 포섭한 실질적 민족 재통합이었습니다." },
+            { q: "후백제가 중국의 여러 나라와 교류하기 위해 이용한 해로는?", options: ["황해(서해) 해로", "동해 해로", "남해 해로", "비단길"], a: 0, exp: "후백제는 서해안을 통해 중국 오월 등과 적극적으로 교류했습니다." },
+            { q: "후삼국 시대 지방에서 독자적인 군사와 경제력을 가진 세력은?", options: ["호족", "문벌귀족", "신진사대부", "권문세족"], a: 0, exp: "신라 말기 중앙 권력이 약화되면서 지방 호족들이 성장했습니다." }
+        ];
+
+        const MAP_DATA = [
+            { id: "neon", name: "🌆 네온 미래 도시", desc: "사이버펑크 조명과 고속 도로가 있는 도심 트랙", bg: 0x0a0c18, trackColor: 0x222840 },
+            { id: "volcano", name: "🌋 화산 폭발 레이싱", desc: "뜨거운 용암 지대와 불타는 운석 지형", bg: 0x1f0808, trackColor: 0x3a1a1a },
+            { id: "ice", name: "❄️ 얼음 왕국", desc: "미끄러운 빙판길과 눈 덮인 거대한 산맥", bg: 0x081b26, trackColor: 0x2b4c5e },
+            { id: "space", name: "🌌 우주 레이싱", desc: "환상적인 별빛과 무중력 감성의 은하수 맵", bg: 0x020208, trackColor: 0x181035 },
+            { id: "desert", name: "🏜️ 사막 폭풍", desc: "모래 언덕과 피라미드가 있는 사막 거점", bg: 0x261a08, trackColor: 0x4a371c },
+            { id: "history", name: "🏯 후삼국 역사 레이싱", desc: "고려, 신라, 후백제의 전통 기와 성곽과 깃발 길", bg: 0x12100d, trackColor: 0x3d3224 },
+            { id: "jungle", name: "🌴 정글 모험", desc: "덩굴과 야자수 사이를 달리는 구불구불 정글 코스", bg: 0x0b2a12, trackColor: 0x6d5a3a },
+            { id: "candy", name: "🍭 캔디 왕국", desc: "사탕과 마카롱이 가득한 달콤한 세잎 클로버 코스", bg: 0x3a1030, trackColor: 0xd77bb5 },
+            { id: "beach", name: "🏖️ 해변 서킷", desc: "파도 소리가 들리는 길고 시원한 해안 도로", bg: 0x0a2a3a, trackColor: 0xc9b27a },
+            { id: "sakura", name: "🌸 벚꽃 거리", desc: "꽃잎이 흩날리는 부드러운 곡선 코스", bg: 0x2a1020, trackColor: 0x8a6f7d },
+            { id: "cloud", name: "☁️ 하늘 섬", desc: "구름 위를 달리는 꽃 모양 하늘 코스", bg: 0x203050, trackColor: 0x9fb6d6 },
+            { id: "haunted", name: "👻 유령의 숲", desc: "으스스한 묘지와 도깨비불이 있는 가장 긴 야간 코스", bg: 0x07050f, trackColor: 0x3b2f4a }
+        ];
+        // 맵별 분위기: [하늘/안개색, 땅색, 밤하늘(별) 여부]
+        const MAP_LOOK = {
+            neon: [0x241a5a, 0x2a2850, true], volcano: [0xff9966, 0x5a2a20, false], ice: [0xbfe9ff, 0xeaf6ff, false],
+            space: [0x070720, 0x1d1b4a, true], desert: [0xffd9a0, 0xe6c27a, false], history: [0x7fd0ff, 0x5cc84a, false],
+            jungle: [0x8fe3b0, 0x2f9e44, false], candy: [0xffc6e8, 0xff9ad5, false], beach: [0x7fe0ff, 0xf2dfa0, false],
+            sakura: [0xffe0ec, 0xf4b6c8, false], cloud: [0xdff3ff, 0xffffff, false], haunted: [0x0a0818, 0x1c2a1c, true]
+        };
+
+        const CAR_DATA = [
+            { id: "sport", name: "🏎️ 스피드 에이스", topSpeed: 38, accel: 0.12, handling: 0.045, color: 0xff3366, price: 0 },
+            { id: "super", name: "🚀 하이퍼 썬더", topSpeed: 44, accel: 0.15, handling: 0.040, color: 0x00e5ff, price: 500 },
+            { id: "future", name: "🛸 사이버 제니스", topSpeed: 48, accel: 0.18, handling: 0.052, color: 0x9d00ff, price: 1200 },
+            { id: "chariot", name: "🏯 후삼국 태봉 전차", topSpeed: 42, accel: 0.14, handling: 0.048, color: 0xffb700, price: 2000 },
+            { id: "bubble", name: "🫧 버블 비틀", topSpeed: 40, accel: 0.13, handling: 0.058, color: 0x66ffcc, price: 800 },
+            { id: "tiger", name: "🐯 호랑이 돌격대", topSpeed: 43, accel: 0.16, handling: 0.046, color: 0xff8a00, price: 1500 },
+            { id: "dragon", name: "🐲 청룡 드리프터", topSpeed: 45, accel: 0.15, handling: 0.056, color: 0x00c853, price: 2400 },
+            { id: "alien", name: "👽 외계인 쿠페", topSpeed: 46, accel: 0.17, handling: 0.050, color: 0xb388ff, price: 3000 },
+            { id: "tank", name: "🛡️ 철갑 전차", topSpeed: 38, accel: 0.20, handling: 0.042, color: 0x78909c, price: 3500 },
+            { id: "rocket", name: "🚀 로켓 카트", topSpeed: 52, accel: 0.20, handling: 0.040, color: 0xff1744, price: 5000 },
+            { id: "gold", name: "👑 황금 왕관", topSpeed: 50, accel: 0.19, handling: 0.055, color: 0xffd700, price: 7000 },
+            { id: "ghost", name: "👻 유령 스프린터", topSpeed: 47, accel: 0.17, handling: 0.060, color: 0xe0e0e0, price: 9000 },
+            { id: "hubaek", name: "🐉 후백제 견훤호", topSpeed: 44, accel: 0.16, handling: 0.050, color: 0x8e24aa, price: 1800 },
+            { id: "taebong", name: "🦅 태봉 궁예 비룡", topSpeed: 46, accel: 0.17, handling: 0.052, color: 0xffa000, price: 2200 },
+            { id: "silla", name: "🌙 신라 금관 카트", topSpeed: 41, accel: 0.14, handling: 0.058, color: 0xffe082, price: 2600 },
+            { id: "goryeo", name: "🏺 고려 청자 터보", topSpeed: 48, accel: 0.18, handling: 0.050, color: 0x26c6da, price: 3200 },
+            { id: "bunny", name: "🐰 토끼 로켓", topSpeed: 43, accel: 0.16, handling: 0.062, color: 0xf8bbd0, price: 3800 },
+            { id: "cat", name: "🐱 냥냥 카트", topSpeed: 42, accel: 0.15, handling: 0.064, color: 0xffcc80, price: 4200 },
+            { id: "shark", name: "🦈 샤크 터보", topSpeed: 49, accel: 0.18, handling: 0.048, color: 0x4fc3f7, price: 5200 },
+            { id: "angel", name: "😇 천사 글라이더", topSpeed: 47, accel: 0.17, handling: 0.056, color: 0xfff9c4, price: 6000 },
+            { id: "cannon", name: "💣 대포 트럭", topSpeed: 40, accel: 0.21, handling: 0.040, color: 0x5d4037, price: 6800 },
+            { id: "phoenix", name: "🔥 불사조", topSpeed: 53, accel: 0.20, handling: 0.050, color: 0xff5722, price: 8500 },
+            { id: "galaxy", name: "🌠 갤럭시 레이서", topSpeed: 51, accel: 0.19, handling: 0.054, color: 0x3949ab, price: 11000 },
+            { id: "legend", name: "🏆 전설의 챔피언", topSpeed: 56, accel: 0.22, handling: 0.058, color: 0xffffff, price: 15000 },
+            { id: "adminx", name: "👑 관리자 카 (최고속도 500)", topSpeed: 125, accel: 0.9, handling: 0.10, color: 0x00ffcc, price: 99999999, reward: true }
+        ];
+        const CAR_STYLE = { sport: 'wing', super: 'rocket', future: 'ufo', chariot: 'tank', bubble: 'bubble', tiger: 'horn', dragon: 'wing', alien: 'ufo', tank: 'tank', rocket: 'rocket', gold: 'crown', ghost: 'bubble', hubaek: 'horn', taebong: 'wing', silla: 'crown', goryeo: 'bubble', bunny: 'ears', cat: 'ears', shark: 'fin', angel: 'halo', cannon: 'cannon', phoenix: 'rocket', galaxy: 'ufo', legend: 'crown' };
+
+        // User Save State
+        let playerStats = {
+            coins: 300,
+            selectedCar: 0,
+            selectedMap: 0,
+            aiDifficulty: "normal",
+            upgrades: { engine: 1, booster: 1, tire: 1 },
+            unlockedCars: CAR_DATA.map((c, i) => i === 0),
+            godMode: false,
+            adm: {}
+        };
+
+        /* =========================================================================
+           2. THREE.JS & GRAPHICS ENGINE SETUP
+           ========================================================================= */
+        let scene, camera, renderer;
+        let clock = new THREE.Clock();
+        let vehicles = []; // 0 is player, 1..7 are AI
+        let trackWaypoints = [];
+        let trackCurve = null;
+        let itemBoxes = [];
+        let worldObstacles = [];
+        let audioCtx = null;
+        const ALL_ITEMS = ['missile','banana','shield','lightning','turbo','magnet','ghost','bomb','hijack','swap','freeze','oil','mega','meteor','timewarp','coin','homing','star','cleanse','triple','spin','quake','sandstorm','jackpot','vacuum','feather','sleep','giant','shrink','blackhole','overdrive','teleport','fortress','rainbow','storm','gift','lucky','blizzard','sniper','twister'];
+
+        // [수정] 트랙 샘플 캐시 / 레이스 상태
+        const SAMPLE_COUNT = 400;
+        let trackSamples = [];
+        let trackNormals = [];
+        let trackBounds = null;
+        let finishOrder = [];
+        let hudTimer = 0;
+        let countdownTimer = null;
+        let driftBonus = 0;
+        let driftScoreTimer = null;
+        let loopErrorLogged = false;
+        const dom = {};
+        let kartPads = [], kartCoins = [];
+        let quizTimer = 30;
+        const isExtreme = () => playerStats.aiDifficulty === "extreme";
+        let fxFromPlayer = false;
+        const HIST_NAMES = ['견훤', '궁예', '왕건', '신검', '양길', '박영규', '최승우', '능애'];
+        const MP = { on: false, id: Math.random().toString(36).slice(2, 8), ch: null, peers: {}, sendT: 0 };
+        MP.slot = parseInt(MP.id, 36) % 5;
+        MP.name = '플레이어' + (MP.slot + 1);
+        MP.names = {};
+
+        // Game Loop Control
+        let gameState = "MENU"; // MENU, COUNTDOWN, RACING, QUIZ, FINISHED
+        let raceTime = 0;
+        let currentQuizIndex = 0;
+        let driftScore = 0;
+        let currentLap = 1;
+        const TOTAL_LAPS = 2;
+
+        // Input States
+        const keys = { forward: false, backward: false, left: false, right: false, drift: false, boost: false, item: false };
+
+        function initThreeEngine() {
+            const container = document.getElementById("canvas-container");
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x0a0c18, 0.005);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(100, 200, 100);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 500;
+            const d = 150;
+            dirLight.shadow.camera.left = -d;
+            dirLight.shadow.camera.right = d;
+            dirLight.shadow.camera.top = d;
+            dirLight.shadow.camera.bottom = -d;
+            scene.add(dirLight);
+
+            window.addEventListener('resize', onWindowResize);
+            setupInputListeners();
+            buildTrackAndWorld();
+            setupAudio();
+        }
+
+        /* =========================================================================
+           3. TRACK GENERATION & 3D MAPS
+           ========================================================================= */
+        // 맵마다 다른 코스 레이아웃 ([x, z] 점들을 이은 폐곡선, 첫 점이 출발선)
+        const MAP_LAYOUTS = {
+            neon: [[0,0],[0,140],[40,240],[150,290],[280,280],[340,200],[300,110],[200,80],[180,0],[240,-90],[340,-170],[300,-260],[160,-290],[40,-250],[-30,-160],[-20,-70]],
+            volcano: [[0,0],[30,120],[-40,220],[60,300],[190,280],[240,190],[170,120],[190,30],[300,-20],[380,-110],[310,-200],[190,-170],[120,-250],[10,-290],[-90,-230],[-110,-120],[-60,-50]],
+            ice: [[0,0],[40,140],[130,240],[260,280],[400,250],[480,150],[470,20],[380,-70],[260,-100],[170,-170],[60,-250],[-70,-270],[-170,-200],[-190,-90],[-120,-20]],
+            space: Array.from({ length: 12 }, (_, k) => { const a = Math.PI + k * Math.PI / 6, r = k % 2 ? 230 : 285; return [Math.round(285 + r * Math.cos(a)), Math.round(r * Math.sin(a))]; }),
+            desert: [[0,0],[0,180],[0,300],[100,370],[240,360],[310,280],[260,190],[160,150],[180,70],[300,40],[420,60],[480,-30],[430,-130],[320,-150],[250,-230],[130,-280],[0,-250],[-90,-170],[-80,-70]],
+            jungle: [[0,0],[10,130],[-60,230],[-20,340],[90,390],[200,340],[230,240],[160,170],[200,80],[310,60],[400,120],[470,60],[450,-50],[350,-90],[300,-180],[200,-240],[90,-200],[40,-290],[-70,-290],[-140,-200],[-110,-100],[-50,-40]],
+            candy: Array.from({ length: 18 }, (_, k) => { const a = k * Math.PI / 9, r = 230 * (1 + 0.3 * Math.cos(3 * a)); return [Math.round(299 + r * Math.cos(Math.PI + a)), Math.round(r * Math.sin(Math.PI + a))]; }),
+            beach: [[0,0],[0,200],[60,330],[200,390],[360,380],[470,300],[500,180],[430,90],[320,80],[250,10],[300,-90],[420,-150],[470,-250],[380,-330],[220,-340],[90,-290],[-20,-200],[-50,-100]],
+            sakura: [[0,0],[-20,120],[10,240],[100,320],[230,330],[330,270],[360,170],[300,90],[200,60],[160,-20],[210,-110],[310,-150],[360,-240],[300,-320],[170,-330],[60,-280],[-30,-210],[-40,-110]],
+            cloud: Array.from({ length: 20 }, (_, k) => { const a = k * Math.PI / 10, r = 260 * (1 + 0.25 * Math.cos(5 * a)); return [Math.round(325 + r * Math.cos(Math.PI + a)), Math.round(r * Math.sin(Math.PI + a))]; }),
+            haunted: [[0,0],[40,120],[0,240],[-60,330],[30,400],[150,370],[190,270],[160,170],[250,110],[360,160],[430,250],[500,180],[470,70],[380,10],[400,-90],[490,-170],[420,-260],[300,-230],[220,-300],[100,-340],[-20,-300],[-100,-210],[-90,-110]],
+            history: [[0,0],[0,150],[30,260],[130,300],[200,250],[300,300],[400,260],[430,150],[380,60],[300,50],[260,-40],[320,-130],[400,-200],[330,-290],[200,-280],[110,-210],[10,-250],[-90,-200],[-100,-100],[-60,-30]]
+        };
+
+        function buildTrackAndWorld() {
+            // Clear existing
+            [...scene.children].forEach(obj => {
+                scene.remove(obj);
+                obj.traverse(o => {
+                    if(o.geometry) o.geometry.dispose();
+                    if(o.material) {
+                        if(Array.isArray(o.material)) o.material.forEach(m => m.dispose());
+                        else o.material.dispose();
+                    }
+                });
+            });
+            vehicles = [];
+
+            const currentMapData = MAP_DATA[playerStats.selectedMap];
+            scene.background = new THREE.Color(currentMapData.bg);
+            scene.fog.color.setHex(currentMapData.bg);
+
+            // Re-add lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+            dirLight.position.set(100, 150, 50);
+            scene.add(dirLight);
+
+            // Generate closed track loop waypoints
+            trackWaypoints = (MAP_LAYOUTS[currentMapData.id] || MAP_LAYOUTS.neon).map(([x, z]) => new THREE.Vector3(x, 0, z));
+
+            trackCurve = new THREE.CatmullRomCurve3(trackWaypoints, true);
+
+            // [수정] 트랙 위 점을 미리 계산해 두고 매 프레임 재계산하지 않음
+            trackSamples = [];
+            for(let i = 0; i < SAMPLE_COUNT; i++) trackSamples.push(trackCurve.getPoint(i / SAMPLE_COUNT));
+            trackNormals = trackSamples.map((p, i) => {
+                const a = trackSamples[(i - 1 + SAMPLE_COUNT) % SAMPLE_COUNT];
+                const b = trackSamples[(i + 1) % SAMPLE_COUNT];
+                const tan = new THREE.Vector3().subVectors(b, a).normalize();
+                return new THREE.Vector3(tan.z, 0, -tan.x);
+            });
+            trackBounds = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
+            trackSamples.forEach(p => {
+                trackBounds.minX = Math.min(trackBounds.minX, p.x);
+                trackBounds.maxX = Math.max(trackBounds.maxX, p.x);
+                trackBounds.minZ = Math.min(trackBounds.minZ, p.z);
+                trackBounds.maxZ = Math.max(trackBounds.maxZ, p.z);
+            });
+            
+            // Build Track Mesh
+            const trackGeo = new THREE.TubeGeometry(trackCurve, 120, 16, 12, true);
+            const trackMat = new THREE.MeshStandardMaterial({ 
+                color: currentMapData.trackColor, 
+                roughness: 0.4, 
+                metalness: 0.2 
+            });
+            const trackMesh = new THREE.Mesh(trackGeo, trackMat);
+            trackMesh.scale.set(1, 0.05, 1); // Flatten tube into road
+            scene.add(trackMesh);
+
+            // Ground Plane
+            const groundGeo = new THREE.PlaneGeometry(1000, 1000);
+            const groundMat = new THREE.MeshStandardMaterial({ color: currentMapData.bg, roughness: 0.9 });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -0.5;
+            scene.add(ground);
+
+            // Spawn Environment Props based on Map Theme
+            buildTrackDetails();
+            spawnMapDecorations(currentMapData.id);
+
+            // Spawn Rainbow Item Boxes along track
+            spawnItemBoxes();
+        }
+
+        function makeProp(id, i) {
+            const M = (c, e = 0x000000, ei = 0) => new THREE.MeshStandardMaterial({ color: c, emissive: e, emissiveIntensity: ei });
+            const g = new THREE.Group();
+            const add = (geo, mat, y, sx = 1, sy = 1, sz = 1) => { const m = new THREE.Mesh(geo, mat); m.position.y = y; m.scale.set(sx, sy, sz); g.add(m); return m; };
+            const pick = [0xff6fb5, 0xffd166, 0x6ee7ff, 0xa78bfa, 0x7ef29d];
+            if(id === 'ice') add(new THREE.ConeGeometry(7, 22, 6), M(0xe8f6ff, 0x4488aa, 0.3), 11);
+            else if(id === 'space') add(new THREE.SphereGeometry(5 + (i % 4), 10, 8), M(0x6a4cff, 0x4422ff, 0.6), 8 + (i % 5) * 3);
+            else if(id === 'desert') add(new THREE.ConeGeometry(9, 16, 4), M(0xd9a85a), 8);
+            else if(id === 'jungle') { add(new THREE.CylinderGeometry(1, 1.3, 10, 8), M(0x6b4a2b), 5); add(new THREE.ConeGeometry(6, 12, 8), M(0x2e9e44), 14); }
+            else if(id === 'candy') { add(new THREE.CylinderGeometry(0.5, 0.5, 10, 8), M(0xffffff), 5); add(new THREE.SphereGeometry(4, 12, 10), M(pick[i % 5], pick[i % 5], 0.25), 12); }
+            else if(id === 'beach') { add(new THREE.CylinderGeometry(0.8, 1, 12, 8), M(0x8b5a2b), 6); add(new THREE.SphereGeometry(5, 8, 6), M(0x2fbf71), 12.5, 1.3, 0.35, 1.3); }
+            else if(id === 'sakura') { add(new THREE.CylinderGeometry(1, 1.3, 9, 8), M(0x5b3a29), 4.5); add(new THREE.SphereGeometry(7, 10, 8), M(0xffb7d5, 0xff7fb0, 0.2), 13); }
+            else if(id === 'cloud') add(new THREE.SphereGeometry(8, 10, 8), M(0xffffff, 0xaaccff, 0.2), 8, 1.6, 0.7, 1);
+            else if(id === 'haunted') { add(new THREE.BoxGeometry(4, 8, 1.5), M(0x5a5a6a, 0x44ff99, 0.15), 4); add(new THREE.SphereGeometry(1, 6, 6), M(0x66ffaa, 0x66ffaa, 1), 10 + (i % 3) * 2); }
+            else add(new THREE.DodecahedronGeometry(5), M(0x445566), 5);
+            return g;
+        }
+
+        function spawnMapDecorations(mapId) {
+            worldObstacles = [];
+            const numProps = 90;
+            for(let i=0; i<numProps; i++) {
+                const t = i / numProps;
+                const pt = trackCurve.getPoint(t);
+                const side = (i % 2 === 0 ? 1 : -1) * (25 + Math.random() * 20);
+                
+                let prop;
+                if(mapId === "neon") {
+                    const geo = new THREE.BoxGeometry(6, 20 + Math.random()*30, 6);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0x112244, emissive: (i%3===0)?0x00f0ff:0xff00a0, emissiveIntensity: 0.5 });
+                    prop = new THREE.Mesh(geo, mat);
+                } else if(mapId === "volcano") {
+                    const geo = new THREE.ConeGeometry(8, 18, 5);
+                    const mat = new THREE.MeshStandardMaterial({ color: 0x2b1515, emissive: 0xff3300, emissiveIntensity: 0.3 });
+                    prop = new THREE.Mesh(geo, mat);
+                } else if(mapId === "history") {
+                    // Korean Castle Wall & Red Pillars
+                    const group = new THREE.Group();
+                    const wallGeo = new THREE.BoxGeometry(10, 8, 4);
+                    const wallMat = new THREE.MeshStandardMaterial({ color: 0x665544 });
+                    const wall = new THREE.Mesh(wallGeo, wallMat);
+                    group.add(wall);
+                    prop = group;
+                } else {
+                    prop = makeProp(mapId, i);
+                }
+
+                const nn = trackNormals[Math.round(t * SAMPLE_COUNT) % SAMPLE_COUNT];
+                prop.position.set(pt.x + nn.x * side * 1.2, 0, pt.z + nn.z * side * 1.2);
+                scene.add(prop);
+            }
+        }
+
+        function spawnItemBoxes() {
+            itemBoxes = [];
+            const boxCount = 24;
+            for(let i=0; i<boxCount; i++) {
+                const t = (i + 0.5) / boxCount;
+                const pt = trackCurve.getPoint(t);
+                
+                const boxGeo = new THREE.BoxGeometry(3, 3, 3);
+                const boxMat = new THREE.MeshStandardMaterial({ 
+                    color: 0xffff00, 
+                    emissive: 0xffaa00, 
+                    emissiveIntensity: 0.8,
+                    wireframe: false 
+                });
+                const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+                const tg = trackCurve.getTangent(t), off = ((i % 3) - 1) * 8;
+                boxMesh.position.set(pt.x + tg.z * off, 2, pt.z - tg.x * off);
+                boxMesh.userData = { active: true, respawnTimer: 0 };
+                scene.add(boxMesh);
+                itemBoxes.push(boxMesh);
+            }
+        }
+
+        /* =========================================================================
+           4. 3D CAR CREATION & PHYSICS SYSTEM
+           ========================================================================= */
+        // ===== 차종별 실제 모양 (고양이는 고양이, 상어는 상어) =====
+        // P(도형, 크기..., 색, x,y,z, sx,sy,sz, rx,ry,rz) — S구 K원뿔 C원기둥 B상자 T도넛 H기본차체숨김 / 색: 'c'가 아니라 숫자 c 또는 w흰 k검정 p분홍 y금 g초록 r빨강 b하늘 o주황 d진한색 (뒤에 * = 발광)
+        const CAR_THEME = {
+            cat: (P, c) => {
+                P('H'); P('S',1,c,0,1.15,-0.2,1.15,0.9,1.9); P('S',0.8,'w',0,0.95,0.7,0.95,0.7,1.3); P('S',1,c,0,1.95,1.5,1.2,1,1);
+                [-1,1].forEach(s => {
+                    P('K',0.38,0.85,c,s*0.7,2.85,1.35,1,1,1,0,0,-s*0.3); P('K',0.2,0.5,'p',s*0.7,2.8,1.45,1,1,0.6,0,0,-s*0.3);
+                    P('S',0.24,'g',s*0.48,2.1,2.38,1,1,0.5); P('S',0.1,'k',s*0.48,2.1,2.5,0.5,1.5,0.5); P('S',0.35,'w',s*0.7,0.6,2.0,1,0.7,1.3);
+                    [-0.12,0,0.12].forEach(dy => P('C',0.015,0.015,1.3,'w',s*1.2,1.8+dy,2.4,1,1,1,0,0,1.57+s*dy*2));
+                });
+                P('S',0.14,'p',0,1.85,2.55,1.3,0.9,0.8);
+                [[0,1.3,-2.2],[0,1.75,-2.5],[0,2.25,-2.55],[0.15,2.75,-2.4]].forEach((p,i) => P('S',0.3-i*0.03,i===3?'k':c,p[0],p[1],p[2]));
+                [-0.5,-1.1,-1.7].forEach(z => P('B',0.9,0.05,0.14,'d',0,2.04,z));
+            },
+            tiger: (P, c) => {
+                CAR_THEME.cat(P, c);
+                [-1.4,-0.9,-0.4,0.1].forEach(z => P('B',1.25,0.05,0.12,'k',0,2.05,z));
+                [-1,1].forEach(s => [-0.9,-0.2,0.5].forEach(z => P('B',0.05,0.5,0.12,'k',s*1.17,1.2,z)));
+                P('S',0.5,'w',0,1.7,2.2,1.1,0.5,0.6);
+            },
+            bunny: (P, c) => {
+                P('H'); P('S',1,c,0,1.15,-0.2,1.1,0.9,1.8); P('S',0.9,'w',0,1.9,1.4,1.05,1,1);
+                [-1,1].forEach(s => {
+                    P('S',0.3,c,s*0.4,3.6,1.1,0.6,2.5,0.45,0,0,-s*0.15); P('S',0.18,'p',s*0.4,3.6,1.25,0.5,2.2,0.3,0,0,-s*0.15);
+                    P('S',0.13,'k',s*0.42,2.15,2.2); P('S',0.15,'p',s*0.55,1.8,2.15,1,0.7,0.5); P('S',0.3,'w',s*0.7,0.6,2.0,1,0.7,1.3);
+                });
+                P('S',0.13,'p',0,1.95,2.4); P('B',0.22,0.28,0.05,'w',0,1.68,2.38); P('S',0.55,'w',0,1.4,-2.2);
+            },
+            shark: (P, c) => {
+                P('H'); P('S',1,c,0,1.1,0,1.1,0.85,2.1); P('S',0.9,'w',0,0.85,0.1,1,0.55,1.9); P('K',0.7,1.4,c,0,1.05,2.3,1,1,1,1.57);
+                P('K',0.6,1.7,c,0,2.35,-0.3,0.4,1,1.2,-0.25); P('K',0.55,1.6,c,0,2.0,-2.4,0.4,1,1,-0.4);
+                [-1,1].forEach(s => {
+                    P('B',0.1,0.7,1.0,c,s*1.2,0.9,0.5,1,1,1,0,0,s*0.5); P('S',0.14,'w',s*0.8,1.5,1.5); P('S',0.09,'k',s*0.84,1.5,1.58);
+                    [0,1,2].forEach(i => P('B',0.03,0.4,0.05,'k',s*1.0,1.25,0.4+i*0.18));
+                });
+                P('B',1.0,0.06,0.1,'k',0,0.8,2.1); [-0.4,-0.2,0,0.2,0.4].forEach(x => P('K',0.07,0.2,'w',x,0.92,2.15,1,1,1,3.14));
+            },
+            dragon: (P, c) => {
+                P('H'); P('S',1,c,0,1.15,-0.1,1.1,0.9,2.0); P('S',0.8,'y',0,0.9,0.4,0.95,0.6,1.5); P('S',0.8,c,0,1.95,1.9,1,0.9,1.2); P('S',0.5,c,0,1.8,2.7,0.9,0.7,1);
+                [-1,1].forEach(s => {
+                    P('S',0.16,'y*',s*0.5,2.2,2.15); P('S',0.07,'k',s*0.52,2.2,2.28); P('K',0.15,0.9,'y',s*0.4,2.85,1.6,1,1,1,-0.4,0,-s*0.2);
+                    P('C',0.03,0.03,1.4,'y',s*0.9,1.6,2.8,1,1,1,0,0,1.57+s*0.3); P('S',0.07,'k',s*0.2,1.9,3.15);
+                });
+                [-1.4,-0.85,-0.3,0.25,0.8].forEach(z => P('K',0.25,0.6,'y',0,2.05,z));
+                [[0,1.2,-2.3,0.45],[0,1.45,-2.8,0.35],[0,1.85,-3.1,0.25]].forEach(p => P('S',p[3],c,p[0],p[1],p[2])); P('K',0.2,0.6,'y',0,2.3,-3.2,1,1,1,-0.8);
+            },
+            hubaek: (P, c) => { CAR_THEME.dragon(P, c); [-1,1].forEach(s => P('B',1.6,0.08,1.2,'d',s*1.8,1.9,-0.4,1,1,1,0,0,s*0.3)); },
+            taebong: (P, c) => {
+                P('H'); P('S',1,c,0,1.2,-0.2,1.0,0.85,1.8); P('S',0.7,'w',0,1.0,0.8,0.9,0.7,1.1); P('S',0.65,'w',0,2.0,1.4); P('K',0.28,0.8,'y',0,1.9,2.25,1,1,1,1.8);
+                [-1,1].forEach(s => {
+                    P('S',0.13,'y',s*0.32,2.15,1.9); P('S',0.07,'k',s*0.34,2.15,1.97); P('B',2.4,0.1,1.4,c,s*2.0,1.7,-0.2,1,1,1,0,0,s*0.35);
+                    P('B',1.0,0.08,1.0,'d',s*3.0,2.1,-0.2,1,1,1,0,0,s*0.35); P('K',0.2,0.6,'y',s*0.5,0.45,2.0,1,1,1,3.14);
+                });
+                P('B',1.0,0.06,1.2,c,0,1.5,-2.5); P('B',0.6,0.06,0.8,'d',0,1.5,-3.3);
+            },
+            phoenix: (P, c) => { CAR_THEME.taebong(P, c); [-1,0,1].forEach(s => P('K',0.3,1.6,'o*',s*0.5,1.6,-3.6,1,1,1,-1.57)); P('K',0.15,0.7,'o*',0,2.9,1.2); },
+            angel: (P, c) => {
+                P('H'); P('S',1,c,0,1.2,-0.2,1.05,0.9,1.8); P('S',0.85,'w',0,2.0,1.2); P('T',0.55,0.08,'y*',0,3.0,1.2,1,1,1,1.57);
+                [-1,1].forEach(s => {
+                    P('S',0.5,'w',s*1.5,2.3,-0.6,0.3,1.8,1.1,0,0,s*0.4); P('S',0.35,'w',s*2.0,2.0,-0.9,0.25,1.4,0.9,0,0,s*0.6);
+                    P('S',0.1,'k',s*0.3,2.1,2.0); P('S',0.14,'p',s*0.5,1.85,2.0,1,0.7,0.5);
+                });
+                P('S',0.1,'p',0,1.85,2.05);
+            },
+            cannon: (P, c) => {
+                P('B',2.2,1.1,1.5,c,0,1.7,1.0); P('B',1.9,0.5,0.05,'b',0,2.0,1.78); P('B',2.2,0.8,2.0,'d',0,1.5,-1.2);
+                P('C',0.45,0.55,3.2,'k',0,2.6,0.2,1,1,1,1.57); P('C',0.6,0.6,0.35,'k',0,2.6,1.9,1,1,1,1.57);
+                [-0.5,0,0.5].forEach(x => P('S',0.3,'k',x,2.05,-1.2));
+            },
+            tank: (P, c) => {
+                P('H'); P('B',2.6,0.9,4.2,c,0,0.9,0); [-1,1].forEach(s => P('B',0.6,0.9,4.7,'k',s*1.5,0.7,0));
+                P('C',0.95,1.05,0.65,c,0,1.65,0.1); P('C',0.2,0.2,2.8,'k',0,1.7,1.8,1,1,1,1.57); P('S',0.3,'d',0,2.15,0.1);
+            },
+            chariot: (P, c) => { CAR_THEME.tank(P, c); P('C',0.05,0.05,2.5,'y',0.9,2.6,-1.4); P('B',0.9,0.7,0.05,'r',1.35,3.4,-1.4); },
+            silla: (P, c) => {
+                P('H'); P('B',2.2,0.4,3.8,'y',0,0.7,0); P('C',1.4,1.25,1.0,'y',0,1.4,0);
+                [-1,-0.5,0,0.5,1].forEach((x,i) => {
+                    const h = 1.3 + (i % 2 === 0 ? 0.5 : 0), d = x >= 0 ? 1 : -1;
+                    P('B',0.18,h,0.12,'y',x,1.9+h/2,0.1); P('S',0.12,'g*',x,1.9+h,0.1);
+                    P('B',0.4,0.08,0.1,'y',x+0.25*d,2.3+h*0.4,0.1,1,1,1,0,0,-0.6*d); P('S',0.1,'g*',x+0.4*d,2.4+h*0.4,0.1);
+                });
+                for(let i = 0; i < 6; i++) P('S',0.14,'g*',Math.cos(i*1.05)*1.3,1.5,Math.sin(i*1.05)*1.3);
+            },
+            goryeo: (P, c) => {
+                P('H'); P('B',2.2,0.4,3.8,'d',0,0.7,0); P('S',1.3,c,0,1.9,0,1,1.05,1.3); P('C',0.5,0.85,1.3,c,0,3.4,0); P('C',0.8,0.55,0.3,c,0,4.15,0);
+                [1.4,1.9,2.4].forEach(y => P('C',1.3,1.3,0.07,'d',0,y,0,1,1,1.3));
+            },
+            alien: (P, c) => {
+                P('H'); P('S',1,c,0,1.1,0,1.8,0.4,2.4); P('S',0.9,'b',0,1.55,0,1.1,1,1.1); P('S',0.5,'g',0,1.9,0,1,1.1,1);
+                [-1,1].forEach(s => P('S',0.14,'k',s*0.22,2.0,0.4,1,0.6,0.5,0,0,s*0.5));
+                for(let i = 0; i < 8; i++) P('S',0.14,'y*',Math.cos(i*0.785)*1.7,1.1,Math.sin(i*0.785)*2.3);
+            },
+            rocket: (P, c) => {
+                P('H'); P('C',0.9,0.9,4,'w',0,1.35,0,1,1,1,1.57); P('K',0.9,1.6,c,0,1.35,2.8,1,1,1,1.57); P('C',0.93,0.93,0.4,c,0,1.35,-0.9,1,1,1,1.57);
+                P('S',0.4,'b',0,1.95,0.7); P('B',1.9,0.1,1.0,c,0,1.35,-1.7); P('B',0.1,1.2,1.0,c,0,1.95,-1.7); P('C',0.5,0.7,0.5,'k',0,1.35,-2.2,1,1,1,1.57);
+            },
+            bubble: (P, c) => {
+                P('H'); P('S',1.3,c,0,1.2,-0.3,1,0.8,1.5); P('B',0.06,0.05,2.8,'k',0,2.22,-0.3);
+                [[-0.6,-0.9],[0.6,-0.9],[-0.6,0.3],[0.6,0.3],[0,-1.6]].forEach(p => P('S',0.22,'k',p[0],2.0,p[1],1,0.5,1));
+                P('S',0.6,'k',0,1.2,1.9,1,0.9,0.9);
+                [-1,1].forEach(s => { P('S',0.18,'w',s*0.3,1.4,2.35); P('S',0.08,'k',s*0.3,1.4,2.48); P('C',0.03,0.03,1.1,'k',s*0.3,2.0,2.2,1,1,1,-0.5,0,-s*0.3); P('S',0.1,'k',s*0.45,2.5,2.0); });
+            },
+            ghost: (P, c) => {
+                P('H'); P('S',1,c,0,1.7,-0.1,1.1,1.1,1.8);
+                for(let i = 0; i < 8; i++) P('S',0.42,c,Math.cos(i*0.785)*1.0,0.95,-0.1+Math.sin(i*0.785)*1.7);
+                [-1,1].forEach(s => { P('S',0.2,'k',s*0.42,2.1,1.5,1,1.6,0.6); P('S',0.15,'p',s*0.75,1.7,1.45,1,0.7,0.5); P('S',0.3,c,s*1.25,1.6,0.3,0.6,1,1,0,0,s*0.5); });
+                P('S',0.2,'k',0,1.55,1.7,1,1.5,0.6);
+            },
+            gold: (P, c) => {
+                P('H'); P('B',2.2,0.4,3.8,'y',0,0.7,0); P('C',1.4,1.2,0.9,'y',0,1.35,0); P('S',1.1,'r',0,1.9,0,1,0.45,1);
+                for(let i = 0; i < 5; i++) { const x = Math.cos(i*1.2566)*1.3, z = Math.sin(i*1.2566)*1.3; P('K',0.3,1.0,'y',x,2.3,z); P('S',0.16,'r*',x,2.9,z); }
+            },
+            adminx: (P, c) => {
+                P('B',2.3,0.5,4.3,'k',0,0.7,0); P('B',2.0,0.35,2.4,'k',0,1.25,-0.3); P('K',0.7,1.4,'g*',0,0.8,2.8,1,1,1,1.57);
+                P('B',3.0,0.12,0.9,'k',0,2.3,-2.3); [-1,1].forEach(s => { P('B',0.12,0.9,0.6,'g*',s*1.5,2.0,-2.3); P('B',0.08,0.08,4.3,'g*',s*1.15,1.0,0); });
+                [-0.7,-0.25,0.25,0.7].forEach(x => { P('C',0.22,0.3,0.7,'k',x,1.2,-2.5,1,1,1,1.57); P('K',0.2,1.3,'o*',x,1.2,-3.3,1,1,1,-1.57); });
+                P('T',0.9,0.07,'y*',0,2.9,0,1,1,1,1.57);
+            },
+            legend: (P, c) => {
+                P('H'); P('B',2.2,0.5,3.8,'k',0,0.7,0); P('B',1.6,0.4,2.6,c,0,1.15,0); P('C',0.3,0.3,0.8,'y',0,1.7,0); P('C',1.4,0.6,1.8,'y',0,2.7,0);
+                [-1,1].forEach(s => P('T',0.5,0.09,'y',s*1.45,2.8,0)); P('S',0.32,'y*',0,3.8,0);
+            }
+        };
+        CAR_THEME.super = CAR_THEME.rocket; CAR_THEME.future = CAR_THEME.alien; CAR_THEME.galaxy = CAR_THEME.alien;
+
+        function applyTheme(g, id, c) {
+            const fn = CAR_THEME[id]; if(!fn) return;
+            const PAL = { w: 0xffffff, k: 0x1a1a1a, p: 0xff8fb1, y: 0xffd54a, g: 0x7cff6b, r: 0xe53935, b: 0x9fdcff, o: 0xff7a18, d: (c >> 1) & 0x7f7f7f };
+            const N = { S: 1, K: 2, C: 3, B: 3, T: 2 };
+            const P = (type, ...a) => {
+                if(type === 'H') { g.children[0].visible = false; return; }
+                const n = N[type], dims = a.slice(0, n); let col = a[n];
+                const [x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1, rx = 0, ry = 0, rz = 0] = a.slice(n + 1);
+                let em = false;
+                if(typeof col === 'string') { if(col.endsWith('*')) { em = true; col = col.slice(0, -1); } col = PAL[col]; }
+                const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.55, emissive: em ? col : 0x000000, emissiveIntensity: em ? 0.7 : 0 });
+                const geo = type === 'S' ? new THREE.SphereGeometry(dims[0], 14, 10)
+                    : type === 'K' ? new THREE.ConeGeometry(dims[0], dims[1], 10)
+                    : type === 'C' ? new THREE.CylinderGeometry(dims[0], dims[1], dims[2], 12)
+                    : type === 'B' ? new THREE.BoxGeometry(dims[0], dims[1], dims[2])
+                    : new THREE.TorusGeometry(dims[0], dims[1], 8, 16);
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.x = rx; m.rotation.y = ry; m.rotation.z = rz;
+                g.add(m);
+            };
+            fn(P, c);
+        }
+
+        function createVehicleMesh(carData, isPlayer = false) {
+            const carGroup = new THREE.Group();
+
+            // Main Chassis
+            const bodyGeo = new THREE.BoxGeometry(2.2, 0.9, 4.2);
+            const bodyMat = new THREE.MeshStandardMaterial({ 
+                color: carData.color, 
+                metalness: 0.2, roughness: 0.45 
+            });
+            const chassis = new THREE.Mesh(bodyGeo, bodyMat);
+            chassis.position.y = 0.8;
+            chassis.castShadow = true;
+            carGroup.add(chassis);
+
+            // Cabin / Roof
+            const cabinGeo = new THREE.BoxGeometry(1.8, 0.7, 2.0);
+            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.1 });
+            const cabin = new THREE.Mesh(cabinGeo, cabinMat);
+            cabin.position.set(0, 1.25, -0.5); cabin.scale.set(0.9, 0.4, 0.8);
+            carGroup.add(cabin);
+
+            // 4 Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.4, 16);
+            const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8 });
+            const wheels = [];
+
+            const wheelPositions = [
+                [-1.1, 0.4, 1.3], [1.1, 0.4, 1.3],
+                [-1.1, 0.4, -1.3], [1.1, 0.4, -1.3]
+            ];
+
+            wheelPositions.forEach(pos => {
+                const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+                wheel.rotation.z = Math.PI / 2;
+                wheel.position.set(...pos);
+                wheel.castShadow = true;
+                carGroup.add(wheel);
+                wheels.push(wheel);
+            });
+
+            // [추가] 카트 스타일 외형: 큰 뒷바퀴, 범퍼, 운전자, 차종별 파츠
+            const themed = !!CAR_THEME[carData.id];
+            const st = themed ? 'none' : (CAR_STYLE[carData.id] || 'wing');
+            cabin.visible = !themed;
+            const colMat = new THREE.MeshStandardMaterial({ color: carData.color, roughness: 0.4 });
+            const white = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+            const bx = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+            const add = (geo, mat, x, y, z, rx = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.rotation.x = rx; carGroup.add(m); return m; };
+            wheels[2].scale.set(1.35, 1, 1.35); wheels[3].scale.set(1.35, 1, 1.35);
+            wheels[2].position.y = 0.55; wheels[3].position.y = 0.55;
+            if(!themed) add(bx(2.4, 0.3, 0.5), white, 0, 0.55, 2.2);
+            if(!themed) add(new THREE.SphereGeometry(0.45, 12, 10), new THREE.MeshStandardMaterial({ color: 0xffd9b0 }), 0, 2.0, -0.3);
+            if(!themed) add(new THREE.SphereGeometry(0.52, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), colMat, 0, 2.05, -0.3);
+            if(st === 'wing') { add(bx(2.6, 0.12, 0.7), colMat, 0, 2.0, -2.1); add(bx(0.15, 0.8, 0.15), white, -0.9, 1.6, -2.1); add(bx(0.15, 0.8, 0.15), white, 0.9, 1.6, -2.1); }
+            else if(st === 'rocket') { add(new THREE.ConeGeometry(0.3, 1, 8), white, -0.6, 1.0, -2.3, -Math.PI / 2); add(new THREE.ConeGeometry(0.3, 1, 8), white, 0.6, 1.0, -2.3, -Math.PI / 2); }
+            else if(st === 'ufo') { add(new THREE.CylinderGeometry(1.8, 1.8, 0.12, 20), colMat, 0, 1.2, -0.3); }
+            else if(st === 'horn') { add(new THREE.ConeGeometry(0.18, 1, 6), white, -0.7, 1.3, 2.1, Math.PI / 2); add(new THREE.ConeGeometry(0.18, 1, 6), white, 0.7, 1.3, 2.1, Math.PI / 2); }
+            else if(st === 'tank') { wheels.forEach(w => w.scale.set(1.3, 1.3, 1.3)); add(new THREE.CylinderGeometry(0.6, 0.7, 0.5, 12), colMat, 0, 1.6, 0.9); }
+            else if(st === 'bubble') { add(new THREE.SphereGeometry(1.25, 16, 12), new THREE.MeshStandardMaterial({ color: 0xaaddff, transparent: true, opacity: 0.3 }), 0, 1.8, -0.3); }
+            else if(st === 'crown') { const gm = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0x886600 }); for(let q = -2; q <= 2; q++) add(new THREE.ConeGeometry(0.12, 0.4, 5), gm, q * 0.2, 2.65, -0.3); }
+            else if(st === 'ears') { add(new THREE.ConeGeometry(0.2, 0.9, 6), colMat, -0.3, 2.7, -0.3); add(new THREE.ConeGeometry(0.2, 0.9, 6), colMat, 0.3, 2.7, -0.3); }
+            else if(st === 'fin') { add(new THREE.ConeGeometry(0.5, 1.6, 4), colMat, 0, 2.0, -1.4); }
+            else if(st === 'halo') { add(new THREE.TorusGeometry(0.6, 0.08, 8, 16), new THREE.MeshStandardMaterial({ color: 0xffe066, emissive: 0xffcc00, emissiveIntensity: 0.8 }), 0, 2.8, -0.3, Math.PI / 2); }
+            else if(st === 'cannon') { add(new THREE.CylinderGeometry(0.35, 0.4, 2.2, 10), new THREE.MeshStandardMaterial({ color: 0x333333 }), 1.5, 0, 1.6).rotation.x = Math.PI / 2; }
+
+            applyTheme(carGroup, carData.id, carData.color);
+
+            // Booster Flames Effect (Back)
+            const flameGeo = new THREE.ConeGeometry(0.4, 1.5, 8);
+            const flameMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.8 });
+            const flame = new THREE.Mesh(flameGeo, flameMat);
+            flame.rotation.x = -Math.PI / 2;
+            flame.position.set(0, 0.8, -2.4);
+            flame.visible = false;
+            carGroup.add(flame);
+
+            // Shield Mesh (Transparent Sphere around car)
+            const shieldGeo = new THREE.SphereGeometry(2.8, 16, 16);
+            const shieldMat = new THREE.MeshBasicMaterial({ color: 0x00ff88, wireframe: true, transparent: true, opacity: 0 });
+            const shield = new THREE.Mesh(shieldGeo, shieldMat);
+            shield.visible = false;
+            carGroup.add(shield);
+
+            scene.add(carGroup);
+
+            return {
+                mesh: carGroup,
+                wheels: wheels,
+                flame: flame,
+                shieldMesh: shield,
+                speed: 0,
+                maxSpeed: carData.topSpeed + (isPlayer ? playerStats.upgrades.engine * 2 : 0),
+                accel: carData.accel,
+                handling: carData.handling + (isPlayer ? playerStats.upgrades.tire * 0.005 : 0),
+                heading: 0,
+                lap: 1,
+                progress: 0,
+                isPlayer: isPlayer,
+                boostTimer: 0,
+                boostMultiplier: 1.0,
+                driftGauge: 0,
+                isDrifting: false,
+                heldItem: null,
+                shieldActive: false,
+                ghostActive: false,
+                slowTimer: 0
+            };
+        }
+
+        function initAllVehicles() {
+            vehicles.forEach(v => scene.remove(v.mesh));
+            vehicles = [];
+            Object.values(MP.peers).forEach(p => p.v = null);
+
+            // [수정] 모든 차량을 출발선 '뒤'에 같은 기준으로 배치 (랩 계산 오류 방지)
+            const place = (carData, isPlayer, t, lateral, lane) => {
+                const veh = createVehicleMesh(carData, isPlayer);
+                const p = trackCurve.getPoint(t);
+                const tan = trackCurve.getTangent(t);
+                veh.mesh.position.set(p.x + tan.z * lateral, 0, p.z - tan.x * lateral);
+                veh.heading = Math.atan2(tan.x, tan.z);
+                veh.mesh.rotation.y = veh.heading;
+                veh.idx = Math.round(t * SAMPLE_COUNT) % SAMPLE_COUNT;
+                veh.progress = veh.idx / SAMPLE_COUNT;
+                veh.lap = 0;
+                veh.kcoins = 0;
+                veh.finished = false;
+                veh.finishTime = 0;
+                veh.offDist = 0;
+                veh.lane = lane;
+                if(!isPlayer) setTag(veh, HIST_NAMES[vehicles.length % 8]);
+                if(carData.reward) veh.maxSpeed = 125;
+                if(isPlayer && playerStats.godMode) veh.maxSpeed = Math.max(veh.maxSpeed, 80);
+                vehicles.push(veh);
+                return veh;
+            };
+
+            place(CAR_DATA[playerStats.selectedCar], true, 0.985, MP.on ? (MP.slot - 2) * 4 : 0, 0);
+
+            for(let i = 1; i <= 7; i++) {
+                const row = Math.ceil(i / 2);
+                const side = (i % 2 === 0 ? 1 : -1);
+                place(CAR_DATA[(i * 3 + playerStats.selectedMap) % CAR_DATA.length], false, 0.985 - row * 0.008, side * 5, side * (2 + (i % 4) * 2));
+            }
+        }
+
+        /* =========================================================================
+           5. GAME LOOP & UPDATE CONTROLS
+           ========================================================================= */
+        function startRace(fromNet) {
+            if(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar) { playerStats.selectedCar = 0; updateCarUI(); }
+            if(!audioCtx) setupAudio();
+            if(audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+
+            document.getElementById("main-menu").classList.add("hidden");
+            document.getElementById("hud").classList.remove("hidden");
+            document.getElementById("touch-controls").classList.remove("hidden");
+            ["quiz-modal", "result-modal", "admin-modal"].forEach(id => document.getElementById(id).classList.add("hidden"));
+
+            // [수정] 이전 레이스 상태 초기화
+            Object.keys(keys).forEach(k => keys[k] = false);
+            raceTime = 0;
+            hudTimer = 0;
+            quizTimer = 25;
+            driftBonus = 0;
+            finishOrder = [];
+            document.getElementById("hud-lap").textContent = `1 / ${TOTAL_LAPS}`;
+            document.getElementById("hud-time").textContent = "00:00.0";
+            document.getElementById("speed-effect").style.opacity = "0";
+            updateItemHUD(null);
+            itemBoxes.forEach(b => { b.userData.active = true; b.userData.respawnTimer = 0; b.visible = true; });
+
+            initAllVehicles();
+            snapCamera();
+            gameState = "COUNTDOWN";
+            runCountdown();
+            if(isExtreme()) setTimeout(() => showGameMessage("☠️ 익스트림: AI 125% 속도 · 약한 고무줄"), 800);
+            if(MP.ch && !fromNet) MP.ch.postMessage({ t: 'start', id: MP.id, name: MP.name, map: playerStats.selectedMap });
+        }
+
+        function runCountdown() {
+            const overlay = document.getElementById("countdown-overlay");
+            const text = document.getElementById("countdown-text");
+            overlay.classList.remove("hidden");
+            if(countdownTimer) clearInterval(countdownTimer);
+
+            let count = 3;
+            text.textContent = count; text.style.color = count > 1 ? '#ff3b3b' : '#ffd400';
+            text.style.opacity = "1";
+            playSound('beep');
+
+            countdownTimer = setInterval(() => {
+                count--;
+                if(count > 0) {
+                    text.textContent = count; text.style.color = count > 1 ? '#ff3b3b' : '#ffd400';
+                    playSound('beep');
+                } else if(count === 0) {
+                    text.textContent = "GO!"; text.style.color = "#3bff6b";
+                    playSound('go');
+                    if(gameState === "COUNTDOWN") gameState = "RACING";
+                } else {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                    overlay.classList.add("hidden");
+                }
+            }, 1000);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            let delta = clock.getDelta();
+            // [수정] 탭 전환/렉 후 큰 delta로 차가 순간이동하거나 튕기는 것 방지
+            if(delta > 0.05) delta = 0.05;
+
+            try {
+                mpTick(delta);
+                if(gameState === "COUNTDOWN" && vehicles.length) {
+                    updateCamera(delta);
+                }
+
+                if(gameState === "RACING") {
+                    raceTime += delta;
+                    quizTimer -= delta;
+                    if(quizTimer <= 0 && vehicles[0] && !vehicles[0].finished && !(vehicles[0].stunTimer > 0)) {
+                        quizTimer = (isExtreme() ? 35 : 40) + Math.random() * (isExtreme() ? 20 : 30);
+                        showGameMessage("📜 역사 퀴즈!");
+                        openQuizModal();
+                    }
+
+                    vehicles.forEach((v, idx) => {
+                        if(v.isPlayer) {
+                            updatePlayerPhysics(v, delta);
+                        } else if(v.remote) {
+                            updateRemote(v, delta);
+                        } else {
+                            updateAIPhysics(v, delta, idx);
+                        }
+                        updateVehicleEffects(v, delta);
+                        kartTick(v, delta);
+                        calculateTrackProgress(v);
+                        if(v.offDist > 90 && !v.remote) respawnOnTrack(v);
+                    });
+
+                    updateItemBoxes(delta);
+                    if(vehicles.length) updateCamera(delta);
+
+                    hudTimer += delta;
+                    if(hudTimer >= 0.1) {
+                        hudTimer = 0;
+                        updateRaceTimerHUD();
+                        updateLeaderboardHUD();
+                    }
+                }
+            } catch(err) {
+                if(!loopErrorLogged) { console.error("게임 루프 오류:", err); loopErrorLogged = true; }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function updatePlayerPhysics(v, delta) {
+            const f = delta * 60; // 프레임레이트와 무관하게 같은 속도감
+            const A = playerStats.adm;
+            if(A.god) { v.stunTimer = 0; v.slowTimer = 0; v.shieldActive = true; }
+            if(v.stunTimer > 0) { v.stunTimer -= delta; v.speed = 0; dom.speedNum.textContent = 0; return; }
+            let effMaxSpeed = v.maxSpeed * v.boostMultiplier * (playerStats.adm.turbo2 ? 2 : 1) * (1 + (v.kcoins || 0) * 0.03);
+            if(v.slowTimer > 0) {
+                effMaxSpeed *= 0.5;
+                v.slowTimer -= delta;
+            }
+            if(v.offDist > 17 && v.maxSpeed < 120) effMaxSpeed *= (isExtreme() ? 0.5 : 0.6); // 트랙 밖(잔디) 감속 (관리자 카는 면제)
+            if(v.maxSpeed >= 120 && !playerStats.adm.turbo2) effMaxSpeed = Math.min(effMaxSpeed, 125); // 관리자 카: 500 상한
+
+            if(keys.forward) {
+                v.speed = Math.min(v.speed + v.accel * f * (playerStats.adm.turbo2 ? 3 : 1), effMaxSpeed);
+            } else if(keys.backward) {
+                v.speed = Math.max(v.speed - v.accel * 1.5 * f, -effMaxSpeed * 0.4);
+            } else {
+                v.speed *= Math.pow(0.98, f);
+            }
+
+            let turnAngle = v.handling * f;
+            if(keys.drift && Math.abs(v.speed) > 10) {
+                v.isDrifting = true;
+                turnAngle *= 1.6;
+                const prevGauge = Math.floor(v.driftGauge);
+                v.driftGauge = Math.min(v.driftGauge + delta * 30, 100);
+                if(Math.floor(v.driftGauge) !== prevGauge) showDriftScore(Math.floor(v.driftGauge));
+            } else {
+                if(v.isDrifting) {
+                    if(v.driftGauge > 50) {
+                        triggerBoost(v, 1.5, 2);
+                        driftBonus += 20;
+                        showGameMessage("DRIFT BOOST!");
+                    }
+                    v.isDrifting = false;
+                    v.driftGauge = 0;
+                }
+            }
+
+            if(keys.left) v.heading += turnAngle;
+            if(keys.right) v.heading -= turnAngle;
+
+            v.mesh.rotation.y = v.heading;
+            v.mesh.translateZ(v.speed * delta * 1.5);
+
+            v.wheels.forEach(w => w.rotation.x += v.speed * delta * 0.5);
+
+            if(keys.boost && v.driftGauge >= 100) {
+                triggerBoost(v, 2.0, 4);
+                v.driftGauge = 0;
+            }
+
+            if(keys.item && v.heldItem && (v.itemCd || 0) <= 0) { v.itemCd = 0.4; useHeldItem(v); }
+            v.itemCd = (v.itemCd || 0) - delta;
+
+            dom.speedNum.textContent = Math.abs(Math.round(v.speed * 4));
+            dom.boostBar.style.width = `${v.driftGauge}%`;
+        }
+
+        function updateAIPhysics(v, delta, idx) {
+            const f = delta * 60;
+            if(playerStats.adm.freezeAI) { v.speed = 0; return; }
+            if(v.stunTimer > 0) { v.stunTimer -= delta * (isExtreme() ? 1.5 : 1); v.speed = 0; return; }
+            if(v.hijackTimer > 0) { // 플레이어가 조종
+                v.hijackTimer -= delta;
+                if(keys.left) v.heading += v.handling * f * 1.5;
+                if(keys.right) v.heading -= v.handling * f * 1.5;
+                v.speed = THREE.MathUtils.lerp(v.speed, 24, Math.min(1, 0.05 * f));
+                v.mesh.rotation.y = v.heading; v.mesh.translateZ(v.speed * delta * 1.5);
+                return;
+            }
+            // 트랙 중앙선 + 차선 오프셋을 따라 주행 (AI끼리 겹치지 않도록)
+            const look = (v.idx + 8) % SAMPLE_COUNT;
+            const tp = trackSamples[look];
+            const tn = trackNormals[look];
+            const tx = tp.x + tn.x * v.lane;
+            const tz = tp.z + tn.z * v.lane;
+
+            const targetHeading = Math.atan2(tx - v.mesh.position.x, tz - v.mesh.position.z);
+
+            let diff = targetHeading - v.heading;
+            while (diff < -Math.PI) diff += Math.PI * 2;
+            while (diff > Math.PI) diff -= Math.PI * 2;
+            v.heading += diff * Math.min(1, 0.05 * f);
+
+            let aiSpeedCap = v.maxSpeed * 0.9;
+            if(playerStats.aiDifficulty === "easy") aiSpeedCap *= 0.75;
+            if(playerStats.aiDifficulty === "hell") aiSpeedCap *= 1.15;
+            if(isExtreme()) {
+                aiSpeedCap *= 1.25;
+                const pl = vehicles[0], gap = (pl.lap + pl.progress) - (v.lap + v.progress);
+                if(gap > 0) aiSpeedCap *= 1 + Math.min(0.12, gap * 1.5); // 플레이어가 앞서면 AI가 더 빨라지는 고무줄
+            }
+            if(v.slowTimer > 0) { aiSpeedCap *= 0.5; v.slowTimer -= delta * (isExtreme() ? 1.5 : 1); }
+
+            v.speed = THREE.MathUtils.lerp(v.speed, aiSpeedCap, Math.min(1, 0.05 * f));
+            v.mesh.rotation.y = v.heading;
+            v.mesh.translateZ(v.speed * delta * 1.5);
+
+            if(v.heldItem && Math.random() < (isExtreme() ? 0.5 : 0.3) * delta) {
+                useHeldItem(v);
+                if(isExtreme()) {
+                    const p = vehicles[0];
+                    if(p && !p.shieldActive && !playerStats.adm.god && p.mesh.position.distanceTo(v.mesh.position) < 150 && Math.random() < 0.2) {
+                        p.stunTimer = 0.8; showGameMessage("😈 익스트림 AI의 공격!");
+                    }
+                }
+            }
+        }
+
+        function updateVehicleEffects(v, delta) {
+            // Boost Flame Visibility
+            if(v.boostTimer > 0) {
+                v.boostTimer -= delta;
+                v.flame.visible = true;
+                if(v.isPlayer) document.getElementById("speed-effect").style.opacity = "1";
+            } else {
+                v.boostMultiplier = 1.0;
+                v.flame.visible = false;
+                if(v.isPlayer) document.getElementById("speed-effect").style.opacity = "0";
+            }
+
+            // Shield Visual
+            v.shieldMesh.visible = v.shieldActive;
+            if(v.shieldActive) v.shieldMesh.material.opacity = 0.6;
+        }
+
+        // 가장 가까운 트랙 샘플 찾기 (이전 위치 근처만 탐색 → 매우 가벼움)
+        function findClosestSample(pos, hintIdx) {
+            let best = 0, bestD = Infinity;
+            const check = (i) => {
+                const p = trackSamples[i];
+                const dx = p.x - pos.x, dz = p.z - pos.z;
+                const d = dx * dx + dz * dz;
+                if(d < bestD) { bestD = d; best = i; }
+            };
+            if(hintIdx !== undefined && hintIdx >= 0) {
+                for(let k = -25; k <= 25; k++) check((hintIdx + k + SAMPLE_COUNT) % SAMPLE_COUNT);
+                if(bestD < 60 * 60) return { idx: best, dist: Math.sqrt(bestD), global: false };
+                bestD = Infinity;
+            }
+            for(let i = 0; i < SAMPLE_COUNT; i++) check(i);
+            return { idx: best, dist: Math.sqrt(bestD), global: true };
+        }
+
+        function rankVehicles() {
+            return [...vehicles].sort((a, b) => {
+                if(a.finished !== b.finished) return a.finished ? -1 : 1;
+                if(a.finished && b.finished) return a.finishTime - b.finishTime;
+                if(a.lap !== b.lap) return b.lap - a.lap;
+                return b.progress - a.progress;
+            });
+        }
+
+        function respawnOnTrack(v) {
+            const t = v.idx / SAMPLE_COUNT;
+            const p = trackCurve.getPoint(t);
+            const tan = trackCurve.getTangent(t);
+            v.mesh.position.set(p.x, 0, p.z);
+            v.heading = Math.atan2(tan.x, tan.z);
+            v.mesh.rotation.y = v.heading;
+            v.speed = 0;
+            v.offDist = 0;
+            if(v.isPlayer) {
+                snapCamera();
+                showGameMessage("트랙 복귀!");
+            }
+        }
+
+        function onLapChanged(v) {
+            if(v.lap > TOTAL_LAPS) {
+                // [수정] AI가 결승선을 넘어도 게임이 멈추지 않음. 플레이어 완주 때만 레이스 종료
+                if(!v.finished) {
+                    v.finished = true;
+                    v.finishTime = raceTime;
+                    finishOrder.push(v);
+                    if(v.isPlayer) finishRace(v);
+                }
+                return;
+            }
+            if(v.isPlayer && v.lap >= 1) {
+                document.getElementById("hud-lap").textContent = `${v.lap} / ${TOTAL_LAPS}`;
+                if(v.lap >= 2) showGameMessage(`LAP ${v.lap}!`);
+            }
+        }
+
+        function calculateTrackProgress(v) {
+            const r = findClosestSample(v.mesh.position, v.idx);
+            if(!r.global && !v.remote) {
+                const d = r.idx - v.idx;
+                if(d < -SAMPLE_COUNT / 2) { v.lap++; onLapChanged(v); }   // 결승선 정방향 통과
+                else if(d > SAMPLE_COUNT / 2) { v.lap--; }               // 역주행 통과
+            }
+            v.idx = r.idx;
+            v.progress = r.idx / SAMPLE_COUNT;
+            v.offDist = r.dist;
+        }
+
+        const _camTarget = new THREE.Vector3();
+        const _camLook = new THREE.Vector3();
+        function updateCamera(delta = 1 / 60, snap = false) {
+            const playerMesh = vehicles[0].mesh;
+            playerMesh.updateMatrixWorld(true);
+            _camTarget.set(0, 7, -15).applyMatrix4(playerMesh.matrixWorld);
+            const k = snap ? 1 : 1 - Math.pow(0.9, delta * 60);
+            camera.position.lerp(_camTarget, k);
+            _camLook.copy(playerMesh.position);
+            _camLook.y += 2;
+            const spd = Math.min(1.3, Math.abs(vehicles[0].speed) / 50);
+            camera.fov += ((60 + spd * 10 + (vehicles[0].boostTimer > 0 ? 12 : 0)) - camera.fov) * 0.08;
+            camera.updateProjectionMatrix();
+            camera.lookAt(_camLook);
+        }
+
+        function snapCamera() {
+            if(vehicles.length) updateCamera(1 / 60, true);
+        }
+
+        /* =========================================================================
+           6. ITEM BOX SYSTEM & 8 UNIQUE ITEMS
+           ========================================================================= */
+        function updateItemBoxes(delta) {
+            const items = ALL_ITEMS;
+
+            itemBoxes.forEach(box => {
+                if(!box.userData.active) {
+                    box.userData.respawnTimer += delta;
+                    if(box.userData.respawnTimer > 5) { // Respawn after 5s
+                        box.userData.active = true;
+                        box.visible = true;
+                        box.userData.respawnTimer = 0;
+                    }
+                    return;
+                }
+
+                box.rotation.y += delta * 2;
+
+                // Collision with vehicles
+                vehicles.forEach(v => {
+                    if(!v.remote && box.position.distanceTo(v.mesh.position) < 3.5 && box.userData.active) {
+                        box.userData.active = false;
+                        box.visible = false;
+                        playSound('itemGet');
+
+                        if(!v.heldItem) {
+                            const randomItem = items[Math.floor(Math.random() * items.length)];
+                            v.heldItem = randomItem;
+                            if(v.isPlayer) updateItemHUD(randomItem);
+                        }
+                    }
+                });
+            });
+        }
+
+        function useHeldItem(v) {
+            const item = v.heldItem;
+            fxFromPlayer = !!v.isPlayer;
+            v.heldItem = (v.isPlayer && playerStats.adm.inf) ? item : null;
+            if(v.isPlayer) updateItemHUD(v.heldItem);
+
+            if(v.isPlayer) showGameMessage(`${item.toUpperCase()} 사용!`);
+
+            switch(item) {
+                case 'missile':
+                    // Hit car ahead
+                    const orderM = rankVehicles();
+                    const myPosM = orderM.indexOf(v);
+                    let target = myPosM > 0 ? orderM[myPosM - 1] : null; // 1등이면 맞출 대상 없음 (자기 자신 격추 버그 수정)
+                    if(target && !target.shieldActive) {
+                        target.stunTimer = 2;
+                        showGameMessage("🚀 미사일 적중!");
+                    }
+                    break;
+                case 'banana':
+                    // Slow down nearest follower
+                    const orderB = rankVehicles();
+                    const myPosB = orderB.indexOf(v);
+                    let follower = (myPosB >= 0 && myPosB < orderB.length - 1) ? orderB[myPosB + 1] : null;
+                    if(follower && !follower.shieldActive) {
+                        follower.speed *= 0.3;
+                    }
+                    break;
+                case 'shield':
+                    v.shieldActive = true;
+                    setTimeout(() => { v.shieldActive = false; }, 6000);
+                    break;
+                case 'lightning':
+                    vehicles.forEach(other => {
+                        if(other !== v && !other.shieldActive) other.slowTimer = 3.0;
+                    });
+                    break;
+                case 'shrink': vehicles.forEach(t => { if(t !== v && !t.shieldActive && t.mesh.position.distanceTo(v.mesh.position) < 60) { t.slowTimer = 3; t.mesh.scale.setScalar(0.5); setTimeout(() => t.mesh.scale.setScalar(1), 3000); } }); break;
+                case 'blackhole': { const o = rankVehicles(), i = o.indexOf(v); o.slice(0, i).forEach(t => { if(!t.shieldActive) { t.stunTimer = 0.8; t.slowTimer = 2; } }); break; }
+                case 'overdrive': triggerBoost(v, 1.6, 10); break;
+                case 'teleport': { const s = trackSamples[(v.idx + 20) % SAMPLE_COUNT]; v.mesh.position.set(s.x, 0, s.z); if(v.isPlayer) snapCamera(); break; }
+                case 'fortress': v.shieldActive = true; setTimeout(() => { v.shieldActive = false; }, 10000); break;
+                case 'rainbow': triggerBoost(v, 1.5, 5); if(v.isPlayer) { playerStats.coins += 50; updateCoinDisplay(); } break;
+                case 'storm': vehicles.forEach(t => { if(t !== v && !t.shieldActive) { if(Math.random() < 0.5) t.stunTimer = 1.2; else t.slowTimer = 3; } }); break;
+                case 'gift': { const pool = ALL_ITEMS.filter(x => x !== 'gift'); v.heldItem = pool[Math.floor(Math.random() * pool.length)]; if(v.isPlayer) updateItemHUD(v.heldItem); break; }
+                case 'lucky': triggerBoost(v, 1.7, 3); if(v.isPlayer) { playerStats.coins += 77; updateCoinDisplay(); } break;
+                case 'blizzard': vehicles.forEach(t => { if(t !== v && !t.shieldActive && t.mesh.position.distanceTo(v.mesh.position) < 100) { t.stunTimer = 1; t.slowTimer = 2; } }); break;
+                case 'sniper': { const t = rankVehicles()[0]; if(t !== v && !t.shieldActive) t.stunTimer = 2.5; break; }
+                case 'twister': vehicles.forEach(t => { if(t !== v && !t.shieldActive && t.mesh.position.distanceTo(v.mesh.position) < 30) t.stunTimer = 1.5; }); break;
+                case 'homing': { const o = rankVehicles(), t = o[o.indexOf(v) - 1]; if(t && !t.shieldActive && true) { t.stunTimer = 2; t.slowTimer = 2; } break; }
+                case 'star': v.shieldActive = true; setTimeout(() => { v.shieldActive = false; }, 6000); triggerBoost(v, 1.5, 6); break;
+                case 'cleanse': v.stunTimer = 0; v.slowTimer = 0; v.shieldActive = true; setTimeout(() => { v.shieldActive = false; }, 3000); break;
+                case 'triple': triggerBoost(v, 2.2, 3.5); break;
+                case 'spin': vehicles.forEach(t => { if(t !== v && !t.shieldActive && true && t.mesh.position.distanceTo(v.mesh.position) < 40) t.stunTimer = 1.2; }); break;
+                case 'quake': vehicles.forEach(t => { if(t !== v && !t.shieldActive && true) { t.stunTimer = 1; t.speed *= 0.6; } }); break;
+                case 'sandstorm': vehicles.forEach(t => { if(t !== v && !t.shieldActive && true && t.mesh.position.distanceTo(v.mesh.position) < 80) t.slowTimer = 4; }); break;
+                case 'jackpot': if(v.isPlayer) { playerStats.coins += 500; updateCoinDisplay(); } break;
+                case 'vacuum': if(v.isPlayer) v.kcoins = 15; break;
+                case 'feather': triggerBoost(v, 1.3, 8); break;
+                case 'sleep': { const o = rankVehicles(), i = o.indexOf(v); o.slice(0, i).forEach(t => { if(!t.shieldActive && true) t.slowTimer = 3; }); break; }
+                case 'giant':
+                    v.mesh.scale.setScalar(1.8); setTimeout(() => v.mesh.scale.setScalar(1), 5000);
+                    triggerBoost(v, 1.2, 5);
+                    vehicles.forEach(t => { if(t !== v && !t.shieldActive && true && t.mesh.position.distanceTo(v.mesh.position) < 15) t.stunTimer = 1.5; });
+                    break;
+                case 'hijack': { // 앞차 5초간 내가 조종
+                    const o = rankVehicles(), t = o[o.indexOf(v) - 1] || o[o.indexOf(v) + 1];
+                    if(t && !t.shieldActive && !t.remote /*keep*/ && t !== v) { if(v.isPlayer) { t.hijackTimer = 5; showGameMessage("🎮 상대 차량 조종 중!"); } else t.stunTimer = 2; }
+                    break; }
+                case 'swap': { // 앞차와 위치 교환
+                    const o = rankVehicles(), t = o[o.indexOf(v) - 1];
+                    if(t && !t.shieldActive && !t.remote /*keep*/) {
+                        ['x','z'].forEach(k => { const a = v.mesh.position[k]; v.mesh.position[k] = t.mesh.position[k]; t.mesh.position[k] = a; });
+                        [v.heading, t.heading] = [t.heading, v.heading]; [v.idx, t.idx] = [t.idx, v.idx]; [v.lap, t.lap] = [t.lap, v.lap];
+                        v.mesh.rotation.y = v.heading; t.mesh.rotation.y = t.heading;
+                        if(v.isPlayer) snapCamera();
+                    }
+                    break; }
+                case 'freeze': { const o = rankVehicles(), t = o[o.indexOf(v) - 1]; if(t && !t.shieldActive && true) t.stunTimer = 3; break; }
+                case 'oil': { const o = rankVehicles(), i = o.indexOf(v); o.slice(i + 1).forEach(t => { if(!t.shieldActive && true) { t.slowTimer = 2.5; t.speed *= 0.5; } }); break; }
+                case 'mega': triggerBoost(v, 3.0, 4); break;
+                case 'meteor': { const o = rankVehicles(), i = o.indexOf(v); o.slice(0, i).forEach(t => { if(!t.shieldActive && true) t.stunTimer = 1.5; }); break; }
+                case 'timewarp': vehicles.forEach(t => { if(t !== v && !t.shieldActive && true) t.slowTimer = 5; }); break;
+                case 'coin': playerStats.coins += 150; updateCoinDisplay(); break;
+                case 'turbo':
+                    triggerBoost(v, 2.2, 3);
+                    break;
+                case 'magnet':
+                    playerStats.coins += 50;
+                    updateCoinDisplay();
+                    break;
+                case 'ghost':
+                    v.ghostActive = true;
+                    setTimeout(() => { v.ghostActive = false; }, 4000);
+                    break;
+                case 'bomb':
+                    vehicles.forEach(other => {
+                        if(other !== v && other.mesh.position.distanceTo(v.mesh.position) < 25) {
+                            other.stunTimer = 1.5;
+                        }
+                    });
+                    break;
+            }
+        }
+
+        function triggerBoost(v, multiplier, duration) {
+            v.boostMultiplier = multiplier;
+            v.boostTimer = duration;
+            playSound('boost');
+        }
+
+        /* =========================================================================
+           7. HISTORY QUIZ SYSTEM
+           ========================================================================= */
+        function openQuizModal() {
+            if(gameState !== "RACING") return;
+            gameState = "QUIZ"; // Pause Race Mechanics
+            Object.keys(keys).forEach(k => keys[k] = false); // 키 눌림 상태 초기화
+            if(document.activeElement) document.activeElement.blur();
+
+            const modal = document.getElementById("quiz-modal");
+            const qObj = QUIZ_DATABASE[Math.floor(Math.random() * QUIZ_DATABASE.length)];
+            currentQuizIndex = QUIZ_DATABASE.indexOf(qObj);
+
+            document.getElementById("quiz-question").textContent = `Q. ${qObj.q}`;
+            const optionsContainer = document.getElementById("quiz-options");
+            optionsContainer.innerHTML = "";
+
+            document.getElementById("quiz-result").classList.add("hidden");
+            document.getElementById("quiz-close-btn").classList.add("hidden");
+
+            qObj.options.forEach((opt, idx) => {
+                const btn = document.createElement("button");
+                btn.className = "w-full text-left p-3.5 rounded-xl bg-black/40 hover:bg-amber-500/30 border border-white/10 font-bold text-sm transition";
+                btn.textContent = `${idx + 1}. ${opt}`;
+                btn.onclick = () => checkQuizAnswer(idx);
+                optionsContainer.appendChild(btn);
+            });
+
+            modal.classList.remove("hidden");
+        }
+
+        function checkQuizAnswer(selectedIdx) {
+            const qObj = QUIZ_DATABASE[currentQuizIndex];
+            const resultBox = document.getElementById("quiz-result");
+            const closeBtn = document.getElementById("quiz-close-btn");
+
+            resultBox.classList.remove("hidden");
+
+            if(selectedIdx === qObj.a) {
+                resultBox.className = "mb-4 p-3 rounded-xl text-sm font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40";
+                resultBox.textContent = `⭕ 정답입니다! [황금 부스터 ${isExtreme() ? 4 : 5}초!]`;
+                
+                // Reward Player
+                triggerBoost(vehicles[0], 3.0, isExtreme() ? 4 : 5);
+                playSound('go');
+            } else {
+                resultBox.className = "mb-4 p-3 rounded-xl text-sm font-bold bg-red-500/20 text-red-300 border border-red-500/40";
+                resultBox.textContent = `❌ 오답입니다! ${isExtreme() ? 6 : 5}초 스턴! 해설: ${qObj.exp}`;
+                if(!playerStats.adm.god) vehicles[0].stunTimer = isExtreme() ? 6 : 5;
+                playSound('beep');
+            }
+
+            closeBtn.classList.remove("hidden");
+        }
+
+        function closeQuizModal() {
+            document.getElementById("quiz-modal").classList.add("hidden");
+            if(document.activeElement) document.activeElement.blur(); // 버튼 포커스 제거 (스페이스로 퀴즈 재오픈 방지)
+            Object.keys(keys).forEach(k => keys[k] = false);
+            clock.getDelta(); // 일시정지 시간 버리기
+            gameState = "RACING";
+        }
+
+        /* =========================================================================
+           8. ADMIN / MANAGEMENT MODE
+           ========================================================================= */
+        function toggleAdminPanel() {
+            const modal = document.getElementById("admin-modal");
+            if(modal.classList.contains("hidden")) {
+                const pw = prompt("관리자 비밀번호를 입력하세요:");
+                if(pw === "0725") {
+                    buildAdminExtras();
+                    modal.classList.remove("hidden");
+                } else if(pw !== null) {
+                    alert("비밀번호가 올바르지 않습니다.");
+                }
+            } else {
+                modal.classList.add("hidden");
+            }
+        }
+
+        function adminAddCoins(amt) {
+            playerStats.coins += amt;
+            updateCoinDisplay();
+            alert(`${amt} 코인이 추가되었습니다.`);
+        }
+
+        function adminToggleGodMode() {
+            if(!vehicles.length) { alert("레이스 중에만 사용할 수 있습니다."); return; }
+            playerStats.godMode = !playerStats.godMode;
+            const btn = document.getElementById("btn-admin-god");
+            if(playerStats.godMode) {
+                btn.textContent = "🛡️ 무적/무한부스터 [ON]";
+                vehicles[0].maxSpeed = Math.max(vehicles[0].maxSpeed, 80);
+            } else {
+                btn.textContent = "🛡️ 무적/무한부스터 [OFF]";
+                vehicles[0].maxSpeed = CAR_DATA[playerStats.selectedCar].topSpeed + playerStats.upgrades.engine * 2;
+            }
+        }
+
+        function adminGiveItem(item) {
+            if(!vehicles.length) { alert("레이스 중에만 사용할 수 있습니다."); return; }
+            vehicles[0].heldItem = item;
+            updateItemHUD(item);
+            alert(`${item} 아이템이 지급되었습니다.`);
+        }
+
+        /* =========================================================================
+           9. HUD & UI UPDATES
+           ========================================================================= */
+        function updateLeaderboardHUD() {
+            const sorted = rankVehicles();
+            const playerRank = sorted.indexOf(vehicles[0]) + 1;
+            dom.rank.innerHTML = `${playerRank}<span class="text-lg text-white">/${vehicles.length}</span>`;
+            drawMinimap(sorted);
+        }
+
+        function drawMinimap(sortedVehicles) {
+            const ctx = dom.minimapCtx;
+            const W = 120, pad = 10;
+            ctx.clearRect(0, 0, W, W);
+
+            const b = trackBounds;
+            const w = b.maxX - b.minX, h = b.maxZ - b.minZ;
+            const scale = (W - pad * 2) / Math.max(w, h);
+            const ox = pad + ((W - pad * 2) - w * scale) / 2;
+            const oz = pad + ((W - pad * 2) - h * scale) / 2;
+            const mx = x => ox + (x - b.minX) * scale;
+            const mz = z => oz + (z - b.minZ) * scale;
+
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
+            ctx.lineWidth = 4;
+            for(let i = 0; i <= SAMPLE_COUNT; i += 8) {
+                const p = trackSamples[i % SAMPLE_COUNT];
+                if(i === 0) ctx.moveTo(mx(p.x), mz(p.z));
+                else ctx.lineTo(mx(p.x), mz(p.z));
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            sortedVehicles.forEach(v => {
+                const p = v.mesh.position;
+                ctx.beginPath();
+                ctx.arc(mx(p.x), mz(p.z), v.isPlayer ? 5 : 3, 0, Math.PI * 2);
+                ctx.fillStyle = v.isPlayer ? "#00ffff" : "#ff3366";
+                ctx.fill();
+            });
+        }
+
+        function updateItemHUD(item) {
+            const icon = document.getElementById("item-icon");
+            const map = { missile:'🚀', banana:'🍌', shield:'🛡️', lightning:'⚡', turbo:'💨', magnet:'🧲', ghost:'👻', bomb:'💣', hijack:'🎮', swap:'🔀', freeze:'🧊', oil:'🛢️', mega:'🔥', meteor:'☄️', timewarp:'⏳', coin:'💰', homing:'🎯', star:'⭐', cleanse:'✨', triple:'🚀', spin:'🌀', quake:'🌋', sandstorm:'🏜️', jackpot:'🎰', vacuum:'🧹', feather:'🪶', sleep:'😴', giant:'🦖', shrink:'🔬', blackhole:'🕳️', overdrive:'🔥', teleport:'🌌', fortress:'🏰', rainbow:'🌈', storm:'⛈️', gift:'🎁', lucky:'🍀', blizzard:'❄️', sniper:'🔭', twister:'🌪️' };
+            if(item) {
+                icon.textContent = map[item] || '❓';
+                icon.classList.remove("opacity-30");
+            } else {
+                icon.textContent = '❓';
+                icon.classList.add("opacity-30");
+            }
+        }
+
+        function showGameMessage(msg) {
+            const el = document.getElementById("game-message");
+            el.textContent = msg;
+            el.classList.remove("scale-0", "opacity-0");
+            el.classList.add("scale-100", "opacity-100");
+            setTimeout(() => {
+                el.classList.remove("scale-100", "opacity-100");
+                el.classList.add("scale-0", "opacity-0");
+            }, 1500);
+        }
+
+        function showDriftScore(score) {
+            const el = dom.driftScore;
+            el.textContent = `DRIFT +${score}`;
+            el.style.opacity = "1";
+            clearTimeout(driftScoreTimer);
+            driftScoreTimer = setTimeout(() => { el.style.opacity = "0"; }, 800);
+        }
+
+        function updateRaceTimerHUD() {
+            const mins = Math.floor(raceTime / 60).toString().padStart(2, '0');
+            const secs = Math.floor(raceTime % 60).toString().padStart(2, '0');
+            const ms = Math.floor((raceTime % 1) * 10);
+            document.getElementById("hud-time").textContent = `${mins}:${secs}.${ms}`;
+        }
+
+        function updateCoinDisplay() {
+            document.getElementById("menu-coins").innerHTML = `<i class="fa-solid fa-coins mr-1"></i>${playerStats.coins}`;
+        }
+
+        /* =========================================================================
+           10. GARAGE, MISSIONS & MENUS
+           ========================================================================= */
+        function nextMap() {
+            playerStats.selectedMap = (playerStats.selectedMap + 1) % MAP_DATA.length;
+            updateMapUI();
+            buildTrackAndWorld();
+        }
+        function prevMap() {
+            playerStats.selectedMap = (playerStats.selectedMap - 1 + MAP_DATA.length) % MAP_DATA.length;
+            updateMapUI();
+            buildTrackAndWorld();
+        }
+        function updateMapUI() {
+            const m = MAP_DATA[playerStats.selectedMap];
+            document.getElementById("map-title").textContent = m.name;
+            document.getElementById("map-desc").textContent = m.desc;
+            document.getElementById("menu-map-name").textContent = m.name;
+        }
+
+        function nextCar() {
+            do { playerStats.selectedCar = (playerStats.selectedCar + 1) % CAR_DATA.length; } while(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar);
+            updateCarUI();
+        }
+        function prevCar() {
+            do { playerStats.selectedCar = (playerStats.selectedCar - 1 + CAR_DATA.length) % CAR_DATA.length; } while(CAR_DATA[playerStats.selectedCar].reward && !playerStats.adminCar);
+            updateCarUI();
+        }
+        function updateCarUI() {
+            const c = CAR_DATA[playerStats.selectedCar];
+            document.getElementById("car-title").textContent = c.name;
+            document.getElementById("car-stat-speed").textContent = `${c.topSpeed * 4} km/h`;
+            document.getElementById("menu-car-name").textContent = c.name;
+        }
+
+        function updateDifficulty(val) {
+            playerStats.aiDifficulty = val;
+        }
+
+        function openGarageModal() { document.getElementById("garage-modal").classList.remove("hidden"); }
+        function closeGarageModal() { document.getElementById("garage-modal").classList.add("hidden"); }
+
+        function openMissionsModal() {
+            const list = document.getElementById("missions-list");
+            list.innerHTML = `
+                <div class="p-3 bg-black/40 rounded-xl border border-white/10 flex justify-between items-center">
+                    <div><div class="font-bold text-sm">레이스 1회 완주</div><div class="text-xs text-amber-400">+200 코인</div></div>
+                    <button class="bg-emerald-600 px-3 py-1.5 rounded-lg text-xs font-bold">완료</button>
+                </div>
+                <div class="p-3 bg-black/40 rounded-xl border border-white/10 flex justify-between items-center">
+                    <div><div class="font-bold text-sm">역사 퀴즈 1회 정답</div><div class="text-xs text-amber-400">+300 코인</div></div>
+                    <button class="bg-gray-700 px-3 py-1.5 rounded-lg text-xs font-bold text-gray-400">진행중</button>
+                </div>
+            `;
+            document.getElementById("missions-modal").classList.remove("hidden");
+        }
+        function closeMissionsModal() { document.getElementById("missions-modal").classList.add("hidden"); }
+
+        function upgradeStat(stat) {
+            const cost = 200 * playerStats.upgrades[stat];
+            if(playerStats.coins >= cost) {
+                playerStats.coins -= cost;
+                playerStats.upgrades[stat]++;
+                updateCoinDisplay();
+                document.getElementById(`lvl-${stat}`).textContent = `Lv.${playerStats.upgrades[stat]}`;
+                alert(`${stat.toUpperCase()} 업그레이드 완료!`);
+            } else {
+                alert("코인이 부족합니다.");
+            }
+        }
+
+        function finishRace(v) {
+            if(gameState === "FINISHED" || !v.isPlayer) return;
+            gameState = "FINISHED";
+            Object.keys(keys).forEach(k => keys[k] = false);
+            document.getElementById("speed-effect").style.opacity = "0";
+
+            const rank = rankVehicles().indexOf(v) + 1;
+            const base = isExtreme() ? 2000 : 500;
+            const earned = base + driftBonus;
+            playerStats.coins += earned;
+            updateCoinDisplay();
+
+            document.getElementById("result-title").textContent = rank === 1 ? "🏆 VICTORY!" : (rank <= 3 ? "🥈 PODIUM!" : "🏁 FINISH!");
+            let ext = '';
+            if(isExtreme() && rank === 1) {
+                const first = !playerStats.adminCar;
+                playerStats.adminCar = true;
+                try { localStorage.setItem('hsg_admin_car', '1'); } catch(e) {}
+                ext = first ? ' · 🔓 관리자 카 해금!' : ' · ☠️ 익스트림 클리어!';
+                if(first) setTimeout(() => alert("🎉 익스트림 클리어! 관리자 자동차를 획득했습니다.\n메인 메뉴 차량 선택 화살표로 선택하세요. (최고속도 500)"), 400);
+            }
+            document.getElementById("result-rank-text").textContent = `최종 순위: ${rank}위${ext}`;
+            document.getElementById("res-coin-base").textContent = `+${base}`;
+            document.getElementById("res-coin-drift").textContent = `+${driftBonus}`;
+            document.getElementById("res-coin-total").textContent = `💰 ${earned}`;
+            document.getElementById("result-modal").classList.remove("hidden");
+        }
+
+        function returnToMenu() {
+            document.getElementById("result-modal").classList.add("hidden");
+            document.getElementById("quiz-modal").classList.add("hidden");
+            document.getElementById("countdown-overlay").classList.add("hidden");
+            document.getElementById("hud").classList.add("hidden");
+            document.getElementById("touch-controls").classList.add("hidden");
+            document.getElementById("main-menu").classList.remove("hidden");
+            document.getElementById("speed-effect").style.opacity = "0";
+            if(countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+            Object.keys(keys).forEach(k => keys[k] = false);
+            vehicles.forEach(v => scene.remove(v.mesh));
+            vehicles = [];
+            if(MP.ch) MP.ch.postMessage({ t: 'bye', id: MP.id, name: MP.name });
+            if(dom.kc) dom.kc.textContent = '';
+            gameState = "MENU";
+        }
+
+
+        /* ===== 추가: 트랙 디테일 / 어드민 / 멀티플레이 ===== */
+
+        function kartTick(v, delta) {
+            if(v.remote) return;
+            v.padCd = (v.padCd || 0) - delta;
+            if(v.padCd <= 0) {
+                for(const p of kartPads) {
+                    if(Math.abs(p.x - v.mesh.position.x) < 7 && Math.abs(p.z - v.mesh.position.z) < 7) { triggerBoost(v, 1.7, 1.2); v.padCd = 1.5; break; }
+                }
+            }
+            if(!v.isPlayer) return;
+            kartCoins.forEach(c => {
+                if(!c.visible) { c.userData.t -= delta; if(c.userData.t <= 0) c.visible = true; return; }
+                c.rotation.y += delta * 4;
+                if(Math.abs(c.position.x - v.mesh.position.x) < 3 && Math.abs(c.position.z - v.mesh.position.z) < 3) {
+                    c.visible = false; c.userData.t = 8;
+                    v.kcoins = Math.min(15, (v.kcoins || 0) + 1);
+                    playerStats.coins += 2; playSound('itemGet');
+                    if(v.boostTimer <= 0) { v.boostMultiplier = 1.12; v.boostTimer = 0.6; }
+                }
+            });
+            if(!dom.kc) { dom.kc = document.createElement('div'); dom.kc.className = 'fixed top-24 left-3 text-yellow-300 font-black text-xl z-30'; document.body.appendChild(dom.kc); }
+            dom.kc.textContent = `🪙 ${v.kcoins || 0}/15 · 속도 +${(v.kcoins || 0) * 3}%`;
+            // 미니터보 드리프트 불꽃 (파랑 → 주황 → 분홍)
+            if(!v.sparks) {
+                v.sparks = [-1.2, 1.2].map(x => { const s = new THREE.Mesh(new THREE.SphereGeometry(0.4, 6, 6), new THREE.MeshBasicMaterial({ color: 0x40a0ff })); s.position.set(x, 0.4, -2); v.mesh.add(s); return s; });
+            }
+            const col = v.driftGauge < 35 ? 0x40a0ff : (v.driftGauge < 75 ? 0xff9a20 : 0xff40d0);
+            v.sparks.forEach(s => { s.visible = !!v.isDrifting; if(v.isDrifting) { s.material.color.setHex(col); s.scale.setScalar(0.8 + Math.random() * 1.2); } });
+        }
+
+        function makeTag(text) {
+            const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+            const g = c.getContext('2d');
+            g.fillStyle = 'rgba(0,0,0,0.55)'; g.fillRect(0, 0, 256, 64);
+            g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.fillStyle = '#ffffff'; g.fillText(text, 128, 44);
+            const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false, transparent: true }));
+            s.scale.set(7, 1.75, 1); s.position.set(0, 4.2, 0);
+            return s;
+        }
+        function setTag(v, text) {
+            if(v.tag) { v.mesh.remove(v.tag); v.tag.material.map.dispose(); v.tag.material.dispose(); }
+            v.tag = makeTag(text); v.mesh.add(v.tag);
+        }
+
+        function buildTrackDetails() {
+            scene.add(new THREE.HemisphereLight(0x99bbff, 0x222233, 0.5));
+            [[1, 0xff2244], [-1, 0xffffff]].forEach(([s, c]) => {
+                const pts = [];
+                for(let i = 0; i < SAMPLE_COUNT; i += 4) {
+                    const p = trackSamples[i], n = trackNormals[i];
+                    pts.push(new THREE.Vector3(p.x + n.x * 16.5 * s, 0.4, p.z + n.z * 16.5 * s));
+                }
+                const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, true), 240, 0.6, 6, true),
+                    new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.4 }));
+                scene.add(m);
+            });
+            const t0 = trackCurve.getTangent(0), g = new THREE.Group();
+            const sl = new THREE.Mesh(new THREE.PlaneGeometry(32, 4), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            sl.rotation.x = -Math.PI / 2; g.add(sl);
+            g.position.set(trackSamples[0].x, 1, trackSamples[0].z); g.rotation.y = Math.atan2(t0.x, t0.z);
+            scene.add(g);
+            const LK = MAP_LOOK[MAP_DATA[playerStats.selectedMap].id] || MAP_LOOK.history;
+            scene.background = new THREE.Color(LK[0]);
+            if(scene.fog) { scene.fog.color.setHex(LK[0]); scene.fog.density = 0.0028; }
+            const gr = new THREE.Mesh(new THREE.PlaneGeometry(3000, 3000), new THREE.MeshStandardMaterial({ color: LK[1] }));
+            gr.rotation.x = -Math.PI / 2; gr.position.y = -0.3; scene.add(gr);
+            const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+            const night = LK[2];
+            for(let i = 0; i < (night ? 160 : 30); i++) {
+                const c = new THREE.Mesh(new THREE.SphereGeometry(night ? 2 : 30, night ? 4 : 10, night ? 4 : 8), cm), a = Math.random() * 6.283, r = 350 + Math.random() * 500;
+                c.position.set(Math.cos(a) * r, (night ? 100 + Math.random() * 300 : 130 + Math.random() * 120), Math.sin(a) * r);
+                if(!night) c.scale.set(2 + Math.random() * 2, 0.6, 1.2);
+                scene.add(c);
+            }
+            kartPads = []; kartCoins = [];
+            for(let i = 20; i < SAMPLE_COUNT; i += 50) { // 대시 패널
+                const p = trackSamples[i], n = trackNormals[i], lane = ((i / 50) % 2 ? 1 : -1) * 6, t = trackCurve.getTangent(i / SAMPLE_COUNT);
+                const pad = new THREE.Mesh(new THREE.PlaneGeometry(7, 12), new THREE.MeshBasicMaterial({ color: 0xffe000 }));
+                pad.rotation.x = -Math.PI / 2;
+                const g = new THREE.Group(); g.add(pad);
+                g.position.set(p.x + n.x * lane, 1, p.z + n.z * lane); g.rotation.y = Math.atan2(t.x, t.z);
+                scene.add(g); kartPads.push({ x: g.position.x, z: g.position.z });
+            }
+            for(let i = 5; i < SAMPLE_COUNT; i += 6) { // 코인
+                const p = trackSamples[i], n = trackNormals[i], lane = Math.sin(i) * 9;
+                const c = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.3, 14), new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xaa8800 }));
+                c.rotation.x = Math.PI / 2;
+                const g = new THREE.Group(); g.add(c);
+                g.position.set(p.x + n.x * lane, 2.2, p.z + n.z * lane); g.userData.t = 0;
+                scene.add(g); kartCoins.push(g);
+            }
+        }
+
+        function buildAdminExtras() {
+            if(document.getElementById("adm-extra")) return;
+            const host = document.getElementById("btn-admin-god").parentElement;
+            const box = document.createElement("div");
+            box.id = "adm-extra"; box.className = "col-span-2 grid grid-cols-2 gap-2 mt-2";
+            const A = playerStats.adm;
+            const mk = (label, fn) => {
+                const b = document.createElement("button");
+                b.className = "bg-fuchsia-600/40 hover:bg-fuchsia-600 border border-fuchsia-400/40 p-2 rounded-xl text-sm font-bold";
+                b.textContent = label; b.onclick = () => fn(b); box.appendChild(b);
+            };
+            const tog = (label, key) => mk(`${label} [OFF]`, b => { A[key] = !A[key]; b.textContent = `${label} [${A[key] ? 'ON' : 'OFF'}]`; });
+            const live = () => { if(gameState !== "RACING") { alert("레이스 중에만 사용할 수 있습니다."); return false; } return true; };
+            tog("👑 완전무적(스턴/감속 면역)", "god");
+            tog("♾️ 아이템 무한 사용", "inf");
+            tog("⚡ 초광속 (속도x2·가속x3)", "turbo2");
+            tog("🧊 AI 전원 정지", "freezeAI");
+            mk("🏁 즉시 1등 완주", () => { if(!live()) return; const p = vehicles[0]; p.finished = true; p.finishTime = -1; p.lap = TOTAL_LAPS + 1; finishOrder.push(p); finishRace(p); });
+            mk("🚀 앞으로 순간이동", () => { if(!live()) return; const p = vehicles[0], s = trackSamples[(p.idx + 24) % SAMPLE_COUNT]; p.mesh.position.set(s.x, 0, s.z); });
+            mk("😵 AI 전원 스턴 10초", () => { if(live()) vehicles.forEach(o => { if(!o.isPlayer && !o.remote) o.stunTimer = 10; }); });
+            mk("🔓 전 차량 해금 + 풀업글", () => {
+                playerStats.unlockedCars = CAR_DATA.map(() => true);
+                ['engine', 'booster', 'tire'].forEach(k => { playerStats.upgrades[k] = 10; const e = document.getElementById('lvl-' + k); if(e) e.textContent = 'Lv.10'; });
+                alert("모든 차량 해금, 업그레이드 Lv.10 (다음 레이스부터 적용)");
+            });
+            mk("💰 +99999 코인", () => { playerStats.coins += 99999; updateCoinDisplay(); });
+            ALL_ITEMS.forEach(it => mk(`🎁 ${it}`, () => { if(live()) adminGiveItem(it); }));
+            host.appendChild(box);
+        }
+
+        function mpLabel() {
+            const b = document.getElementById('mp-btn');
+            if(b) b.textContent = MP.on ? `👥 [ON] ${MP.name} · 접속 ${Object.keys(MP.peers).length}명: ${Object.keys(MP.peers).map(i => MP.names[i] || i).join(', ')} (시작하면 모두 같이 출발 · 1~4 이모티콘)` : '👥 온라인 멀티플레이 [OFF] — 방 코드로 친구와 실시간 레이스';
+        }
+        /* ---- Supabase 연동 ---- */
+        const SB_URL = "https://iqizdyomtawydwladrlx.supabase.co";
+        const SB_KEY = "sb_publishable_KuvsC9JfRB1rpEOU8iTNiA_sO2rbJA-";
+        let sbClient = null;
+        function getSB() {
+            if(sbClient) return sbClient;
+            if(!window.supabase || !window.supabase.createClient) return null;
+            sbClient = window.supabase.createClient(SB_URL, SB_KEY, { realtime: { params: { eventsPerSecond: 20 } } });
+            return sbClient;
+        }
+        // BroadcastChannel과 같은 인터페이스(postMessage/close)를 가진 Supabase Realtime 어댑터
+        function mpOpenChannel(room, onmsg, onReady) {
+            const sb = getSB();
+            const chan = sb.channel("hamsamguk-race-v1-" + room, { config: { broadcast: { self: false, ack: false } } });
+            const shim = {
+                ready: false, chan,
+                postMessage(m) { if(shim.ready) chan.send({ type: 'broadcast', event: 'm', payload: m }); },
+                close() { shim.ready = false; sb.removeChannel(chan); }
+            };
+            chan.on('broadcast', { event: 'm' }, ({ payload }) => onmsg(payload))
+                .subscribe(status => {
+                    if(status === 'SUBSCRIBED') { shim.ready = true; onReady && onReady(); }
+                    else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') { showGameMessage && showGameMessage("⚠️ 멀티플레이 서버 연결 문제 (" + status + ")"); }
+                });
+            return shim;
+        }
+        async function mpHeartbeat() {
+            const sb = getSB(); if(!sb || !MP.on || !MP.room) return;
+            try { await sb.from('mp_rooms').upsert({ code: MP.room, players: Object.keys(MP.peers).length + 1, updated_at: new Date().toISOString() }, { onConflict: 'code' }); } catch(e) {}
+        }
+        async function mpToggle() {
+            if(MP.busy) return;
+            if(!MP.on) {
+                if(!getSB()) { alert("Supabase 라이브러리를 불러오지 못했습니다. 인터넷 연결을 확인하세요."); return; }
+                MP.busy = true;
+                try {
+                    const nm = prompt("닉네임을 입력하세요", MP.name);
+                    if(nm === null) return;
+                    MP.name = (nm || MP.name).slice(0, 8);
+                    let list = "";
+                    try {
+                        const { data } = await getSB().from('mp_rooms').select('code,players')
+                            .gte('updated_at', new Date(Date.now() - 30000).toISOString()).order('updated_at', { ascending: false }).limit(8);
+                        if(data && data.length) list = "\n\n현재 열린 방: " + data.map(r => `${r.code}(${r.players}명)`).join(", ");
+                    } catch(e) {}
+                    const rc = prompt("방 코드를 입력하세요 (같은 코드끼리 만납니다)" + list, "1");
+                    if(rc === null) return;
+                    MP.room = ((rc || "1").trim() || "1").slice(0, 20);
+                    MP.on = true; MP.peers = {};
+                    MP.ch = mpOpenChannel(MP.room, mpRecv, () => {
+                        MP.ch.postMessage({ t: 'hello', id: MP.id, name: MP.name });
+                        mpHeartbeat();
+                    });
+                    clearInterval(MP.timer);
+                    MP.timer = setInterval(() => {
+                        if(!MP.ch) return;
+                        MP.ch.postMessage({ t: 'ping', id: MP.id, name: MP.name });
+                        const now = performance.now();
+                        for(const id in MP.peers) { const q = MP.peers[id]; if(now - q.last > 8000) { removeRemote(q); delete MP.peers[id]; } }
+                        mpLabel();
+                    }, 2000);
+                    clearInterval(MP.hb); MP.hb = setInterval(mpHeartbeat, 10000);
+                } finally { MP.busy = false; }
+            } else {
+                mpLeave();
+            }
+            mpLabel();
+        }
+        function mpLeave() {
+            clearInterval(MP.timer); clearInterval(MP.hb);
+            if(MP.ch) {
+                MP.ch.postMessage({ t: 'bye', id: MP.id, name: MP.name });
+                const ch = MP.ch, room = MP.room, empty = Object.keys(MP.peers).length === 0;
+                setTimeout(() => ch.close(), 150);
+                if(empty && room) { try { getSB().from('mp_rooms').delete().eq('code', room).then(() => {}); } catch(e) {} }
+            }
+            Object.values(MP.peers).forEach(q => removeRemote(q));
+            MP.ch = null; MP.on = false; MP.peers = {}; MP.room = null;
+        }
+        window.addEventListener('beforeunload', () => { try { if(MP.ch) MP.ch.postMessage({ t: 'bye', id: MP.id, name: MP.name }); } catch(e) {} });
+        function removeRemote(q) {
+            if(!q.v) return;
+            scene.remove(q.v.mesh); vehicles = vehicles.filter(x => x !== q.v); q.v = null;
+        }
+        function mpRecv(m) {
+            if(!m || m.id === MP.id || !MP.ch) return;
+            const now = performance.now();
+            if(m.name) MP.names[m.id] = m.name;
+            if(m.t === 'hello') { MP.peers[m.id] = MP.peers[m.id] || { v: null, last: now }; MP.ch.postMessage({ t: 'hi', id: MP.id, name: MP.name }); mpLabel(); }
+            else if(m.t === 'ping') { const q = MP.peers[m.id] || (MP.peers[m.id] = { v: null, last: now }); q.last = now; }
+            else if(m.t === 'hi') { MP.peers[m.id] = MP.peers[m.id] || { v: null, last: now }; mpLabel(); }
+            else if(m.t === 'bye') { const q = MP.peers[m.id]; if(q) removeRemote(q); delete MP.peers[m.id]; mpLabel(); }
+            else if(m.t === 'start') {
+                if(gameState === "MENU") { playerStats.selectedMap = m.map; updateMapUI(); buildTrackAndWorld(); startRace(true); }
+            } else if(m.t === 'fx') {
+                const p = vehicles[0];
+                if(m.to === MP.id && p && !p.shieldActive && !playerStats.adm.god && gameState === "RACING") {
+                    if(m.kind === 'stun') p.stunTimer = m.dur; else p.slowTimer = m.dur;
+                    showGameMessage(m.kind === 'stun' ? "💥 공격당했다! 스턴!" : "🐌 감속 공격!");
+                }
+            } else if(m.t === 'emo') {
+                const q = MP.peers[m.id];
+                if(q && q.v) { setTag(q.v, (m.name || '') + ' ' + m.e); clearTimeout(q.et); q.et = setTimeout(() => { if(q.v) setTag(q.v, m.name || '플레이어'); }, 2000); }
+            } else if(m.t === 's') {
+                const q = MP.peers[m.id] || (MP.peers[m.id] = { v: null, last: 0 });
+                q.last = now;
+                if(!vehicles.length) return;
+                if(!q.v) {
+                    const v = createVehicleMesh(CAR_DATA[m.car % CAR_DATA.length], false);
+                    v.remote = true; v.peerId = m.id; setTag(v, m.name || '플레이어');
+                    ['stun', 'slow'].forEach(k => Object.defineProperty(v, k + 'Timer', { get() { return 0; }, set(x) { if(x > 0 && fxFromPlayer && MP.ch) MP.ch.postMessage({ t: 'fx', to: v.peerId, kind: k, dur: x, id: MP.id }); } }));
+                    v.mesh.position.set(m.x, 0, m.z); v.heading = m.h; v.lane = 0;
+                    v.idx = findClosestSample(v.mesh.position).idx; v.offDist = 0;
+                    q.v = v; vehicles.push(v); mpLabel();
+                }
+                Object.assign(q.v, { tx: m.x, tz: m.z, th: m.h, speed: m.sp, lap: m.lap, finished: m.fin, finishTime: m.ft });
+            }
+        }
+        function mpTick(delta) {
+            if(!MP.ch || gameState === "MENU" || !vehicles.length) return;
+            MP.sendT += delta;
+            if(MP.sendT >= 0.1) {
+                MP.sendT = 0;
+                const p = vehicles[0];
+                MP.ch.postMessage({ t: 's', id: MP.id, name: MP.name, car: playerStats.selectedCar, x: p.mesh.position.x, z: p.mesh.position.z, h: p.heading, sp: p.speed, lap: p.lap, fin: p.finished, ft: p.finishTime });
+            }
+            const now = performance.now();
+            for(const id in MP.peers) { const q = MP.peers[id]; if(q.v && now - q.last > 4000) removeRemote(q); }
+        }
+        function updateRemote(v, delta) {
+            const k = Math.min(1, delta * 12);
+            v.mesh.position.x += (v.tx - v.mesh.position.x) * k;
+            v.mesh.position.z += (v.tz - v.mesh.position.z) * k;
+            let d = v.th - v.heading;
+            while(d < -Math.PI) d += 6.2832; while(d > Math.PI) d -= 6.2832;
+            v.heading += d * k; v.mesh.rotation.y = v.heading;
+            v.wheels.forEach(w => w.rotation.x += v.speed * delta * 0.5);
+        }
+
+        /* =========================================================================
+           11. AUDIO & INPUT LISTENERS
+           ========================================================================= */
+        function setupAudio() {
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch(e) { audioCtx = null; }
+        }
+
+        function playSound(type) {
+            if(!audioCtx) return;
+            try {
+                if(audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                const now = audioCtx.currentTime;
+                let dur = 0.15;
+
+                if(type === 'beep') {
+                    osc.frequency.setValueAtTime(440, now);
+                    gain.gain.setValueAtTime(0.1, now);
+                    dur = 0.15;
+                } else if(type === 'go') {
+                    osc.frequency.setValueAtTime(880, now);
+                    gain.gain.setValueAtTime(0.2, now);
+                    dur = 0.4;
+                } else if(type === 'boost') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(200, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.5);
+                    gain.gain.setValueAtTime(0.2, now);
+                    dur = 0.5;
+                } else if(type === 'itemGet') {
+                    osc.frequency.setValueAtTime(660, now);
+                    osc.frequency.exponentialRampToValueAtTime(1000, now + 0.12);
+                    gain.gain.setValueAtTime(0.1, now);
+                    dur = 0.15;
+                } else {
+                    return;
+                }
+                osc.start(now);
+                osc.stop(now + dur);
+                osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+            } catch(e) { /* 사운드 오류는 게임에 영향 없도록 무시 */ }
+        }
+
+        function setupInputListeners() {
+            const keyMap = {
+                KeyW: 'forward', ArrowUp: 'forward',
+                KeyS: 'backward', ArrowDown: 'backward',
+                KeyA: 'left', ArrowLeft: 'left',
+                KeyD: 'right', ArrowRight: 'right',
+                ShiftLeft: 'drift', ShiftRight: 'drift',
+                Space: 'boost', KeyE: 'item'
+            };
+            const resetKeys = () => Object.keys(keys).forEach(k => keys[k] = false);
+            const inRace = () => gameState === "RACING" || gameState === "COUNTDOWN";
+
+            window.addEventListener('keydown', e => {
+                const k = keyMap[e.code];
+                if(!k) return;
+                // [수정] 스페이스가 포커스된 버튼(퀴즈 등)을 눌러버리는 문제 방지
+                if(inRace()) e.preventDefault();
+                keys[k] = true;
+            });
+            window.addEventListener('keyup', e => {
+                const k = keyMap[e.code];
+                if(!k) return;
+                if(inRace()) e.preventDefault();
+                keys[k] = false;
+            });
+
+            // [수정] 창 포커스를 잃거나 탭이 숨겨지면 키 눌림 해제 (키가 눌린 채 굳는 문제 방지)
+            window.addEventListener('blur', resetKeys);
+            document.addEventListener('visibilitychange', () => { if(document.hidden) resetKeys(); });
+
+            const unlockAudio = () => { if(audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {}); };
+            window.addEventListener('pointerdown', unlockAudio);
+            window.addEventListener('keydown', unlockAudio);
+
+            const bindTouch = (id, keyName) => {
+                const btn = document.getElementById(id);
+                if(!btn) return;
+                const down = (e) => { e.preventDefault(); keys[keyName] = true; btn.classList.add("active"); };
+                const up = (e) => { e.preventDefault(); keys[keyName] = false; btn.classList.remove("active"); };
+                btn.addEventListener('touchstart', down, { passive: false });
+                btn.addEventListener('touchend', up, { passive: false });
+                btn.addEventListener('touchcancel', up, { passive: false });
+                btn.addEventListener('mousedown', down);
+                btn.addEventListener('mouseup', up);
+                btn.addEventListener('mouseleave', up);
+            };
+
+            bindTouch('btn-left', 'left');
+            bindTouch('btn-right', 'right');
+            bindTouch('btn-gas', 'forward');
+            bindTouch('btn-brake', 'backward');
+            bindTouch('btn-drift', 'drift');
+            bindTouch('btn-boost', 'boost');
+            bindTouch('btn-item', 'item');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /* =========================================================================
+           12. INIT ENTRY POINT
+           ========================================================================= */
+        window.onload = () => {
+            dom.speedNum = document.getElementById("speed-num");
+            dom.boostBar = document.getElementById("boost-bar-fill");
+            dom.rank = document.getElementById("hud-rank");
+            dom.driftScore = document.getElementById("drift-score");
+            dom.minimapCtx = document.getElementById("minimapCanvas").getContext("2d");
+
+            try { if(localStorage.getItem('hsg_admin_car') === '1') playerStats.adminCar = true; } catch(e) {}
+            initThreeEngine();
+            updateCoinDisplay();
+            window.addEventListener('keydown', e => {
+                const em = { Digit1: '👍', Digit2: '😂', Digit3: '😡', Digit4: '🏆' }[e.code];
+                if(!em || !vehicles.length || (gameState !== "RACING" && gameState !== "COUNTDOWN")) return;
+                showGameMessage(em);
+                if(MP.ch) MP.ch.postMessage({ t: 'emo', e: em, id: MP.id, name: MP.name });
+            });
+            const sb = document.querySelector('button[onclick="startRace()"]');
+            if(sb) {
+                const b = document.createElement('button');
+                b.id = 'mp-btn'; b.className = 'w-full mt-2 bg-sky-600/40 border border-sky-400/50 text-sky-200 font-bold py-2 rounded-2xl text-sm';
+                b.onclick = mpToggle; sb.parentElement.insertAdjacentElement('afterend', b); mpLabel();
+            }
+
+            // 모바일 등에서 WebGL 컨텍스트가 끊겨도 화면이 먹통 되지 않도록
+            renderer.domElement.addEventListener('webglcontextlost', e => e.preventDefault());
+
+            animate();
+        };
+    </script>
+</body>
+</html>
