@@ -1188,10 +1188,12 @@
 
             place(CAR_DATA[playerStats.selectedCar], true, 0.985, MP.on ? (MP.slot - 2) * 4 : 0, 0);
 
+            // NPC는 관리자 전용 차(reward)를 탈 수 없음
+            const NPC_CARS = CAR_DATA.filter(c => !c.reward);
             for(let i = 1; i <= 7; i++) {
                 const row = Math.ceil(i / 2);
                 const side = (i % 2 === 0 ? 1 : -1);
-                place(CAR_DATA[(i * 3 + playerStats.selectedMap) % CAR_DATA.length], false, 0.985 - row * 0.008, side * 5, side * (2 + (i % 4) * 2));
+                place(NPC_CARS[(i * 3 + playerStats.selectedMap) % NPC_CARS.length], false, 0.985 - row * 0.008, side * 5, side * (2 + (i % 4) * 2));
             }
         }
 
